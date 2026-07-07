@@ -14,12 +14,18 @@ async function login(page: Page) {
   await page.goto("/");
   await page.getByRole("button", { name: "Login" }).click();
   await expect(page.getByText("Signed in to the demo workspace.")).toBeVisible({ timeout: 15_000 });
+  if (await page.getByLabel("Vault password").isVisible().catch(() => false)) {
+    await page.getByLabel("Vault password").fill("demo123");
+    await page.getByRole("button", { name: "Unlock vault" }).click();
+    await expect(page.getByText("Vault Production unlocked for this session.")).toBeVisible();
+  }
 }
 
 async function createVault(page: Page, name: string, environment: string) {
   await page.getByLabel("New vault").click();
   await page.getByLabel("New vault name").fill(name);
   await page.getByLabel("New vault environment").fill(environment);
+  await page.getByLabel("New vault password").fill("demo123");
   await page.getByRole("dialog", { name: "Focused edit drawer" }).getByRole("button", { name: "Create Vault" }).click();
   await expect(page.getByText(`Vault ${name} created.`)).toBeVisible();
 }

@@ -15,6 +15,8 @@ type Vault = {
   environment: string;
   secretCount: number;
   updatedAt: string;
+  locked: boolean;
+  unlockedUntil?: string;
 };
 
 type Secret = {
@@ -153,8 +155,9 @@ export default function Home() {
   const [transferMode, setTransferMode] = useState<TransferMode>(null);
   const [projectForm, setProjectForm] = useState({ name: "Launch Validation", description: "Local prototype vaults" });
   const [projectEditForm, setProjectEditForm] = useState({ name: "", description: "" });
-  const [vaultForm, setVaultForm] = useState({ name: "Customer Demo", environment: "staging" });
+  const [vaultForm, setVaultForm] = useState({ name: "Customer Demo", environment: "staging", password: "demo123" });
   const [vaultEditForm, setVaultEditForm] = useState({ name: "", environment: "" });
+  const [unlockPassword, setUnlockPassword] = useState("demo123");
   const [secretForm, setSecretForm] = useState({
     key: "DEMO_PROVIDER_KEY",
     value: "demo-created-secret-value",
@@ -168,9 +171,6 @@ export default function Home() {
   const [plaintextConfirmed, setPlaintextConfirmed] = useState(false);
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
   const [trustState, setTrustState] = useState<TrustState>("demo-safe");
-  const isLocked = trustState === "locked";
-  const isScreenshotSafe = trustState === "screenshot-safe";
-  const plaintextActionsBlocked = isLocked || isScreenshotSafe;
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId),
@@ -181,6 +181,10 @@ export default function Home() {
     () => secrets.find((secret) => secret.id === selectedSecretId),
     [secrets, selectedSecretId]
   );
+  const isVaultLocked = Boolean(selectedVault?.locked);
+  const isLocked = trustState === "locked" || isVaultLocked;
+  const isScreenshotSafe = trustState === "screenshot-safe";
+  const plaintextActionsBlocked = isLocked || isScreenshotSafe;
   const recentAudit = auditEvents.slice(0, 5);
   const hasDuplicateDraft = secrets.some((secret) => {
     const keyMatches = secret.key.toLowerCase() === secretForm.key.trim().toLowerCase();
@@ -291,6 +295,21 @@ export default function Home() {
     });
   }, [selectedVault]);
 
+  useEffect(() => {
+    if (!selectedVaultId) return;
+    const lockSelectedVault = () => {
+      void fetch(`/api/vaults/${selectedVaultId}/lock`, {
+        method: "POST",
+        keepalive: true,
+        headers: actorHeader
+      });
+    };
+    window.addEventListener("pagehide", lockSelectedVault);
+    return () => {
+      window.removeEventListener("pagehide", lockSelectedVault);
+    };
+  }, [selectedVaultId]);
+
   async function runAction(action: () => Promise<void>) {
     setError("");
     setNotice("");
@@ -392,6 +411,30 @@ export default function Home() {
       await refresh(selectedProjectId, data.vault.id);
       closeDrawer();
       setNotice(`Vault ${data.vault.name} created.`);
+    });
+  }
+
+  async function unlockVault(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedVaultId) return;
+    await runAction(async () => {
+      const data = await api<{ vault: Vault }>(`/api/vaults/${selectedVaultId}/unlock`, {
+        method: "POST",
+        body: JSON.stringify({ password: unlockPassword })
+      });
+      await refresh(selectedProjectId, data.vault.id, selectedSecretId);
+      setNotice(`Vault ${data.vault.name} unlocked for this session.`);
+    });
+  }
+
+  async function lockVault() {
+    if (!selectedVaultId) return;
+    await runAction(async () => {
+      const data = await api<{ vault: Vault }>(`/api/vaults/${selectedVaultId}/lock`, { method: "POST" });
+      await refresh(selectedProjectId, data.vault.id, selectedSecretId);
+      setRevealedValue("");
+      setExportResult(null);
+      setNotice(`Vault ${data.vault.name} locked and in-memory key cleared.`);
     });
   }
 
@@ -651,7 +694,7 @@ export default function Home() {
                 onClick={() => setSelectedVaultId(vault.id)}
               >
                 <strong>{vault.name}</strong>
-                <span>{vault.environment} / {vault.secretCount} secrets</span>
+                  <span>{vault.environment} / {vault.secretCount} secrets / {vault.locked ? "locked" : "unlocked"}</span>
               </button>
             ))}
             {!vaults.length && (
@@ -699,7 +742,20 @@ export default function Home() {
             {isLocked ? (
               <div className="state-panel locked-state" data-testid="locked-state">
                 <strong>Vault is locked</strong>
-                <span>Secrets, selected detail, import, and plaintext output stay hidden until the session is refreshed.</span>
+                <span>Unlock this vault with its 6-20 character password. The password is not stored; only the derived key is cached briefly in memory.</span>
+                {isVaultLocked && (
+                  <form className="unlock-form" onSubmit={unlockVault}>
+                    <input
+                      aria-label="Vault password"
+                      type="password"
+                      minLength={6}
+                      maxLength={20}
+                      value={unlockPassword}
+                      onChange={(event) => setUnlockPassword(event.target.value)}
+                    />
+                    <button type="submit">Unlock vault</button>
+                  </form>
+                )}
               </div>
             ) : !selectedVault ? (
               <div className="state-panel empty-state">
@@ -758,13 +814,16 @@ export default function Home() {
             <section className="rail-panel">
               <div className="rail-header">
                 <h2>Vault health</h2>
-                <span className={isScreenshotSafe ? "status-pill safe" : "status-pill"}>{isScreenshotSafe ? "Screenshot-safe" : "Demo-safe"}</span>
+                <span className={isVaultLocked ? "status-pill danger" : "status-pill safe"}>{isVaultLocked ? "Locked" : "Unlocked"}</span>
               </div>
               <dl className="health-list">
                 <div><dt>Secrets</dt><dd>{secrets.length}</dd></div>
                 <div><dt>Audit rows</dt><dd>{auditEvents.length}</dd></div>
-                <div><dt>State</dt><dd>{trustState}</dd></div>
+                <div><dt>State</dt><dd>{isVaultLocked ? "locked" : trustState}</dd></div>
               </dl>
+              {selectedVault && !isVaultLocked && (
+                <button className="secondary" type="button" onClick={() => void lockVault()}>Lock vault</button>
+              )}
               <select aria-label="Trust state" value={trustState} onChange={(event) => changeTrustState(event.target.value as TrustState)}>
                 <option value="demo-safe">Demo-safe / fake secrets only</option>
                 <option value="locked">Locked vault</option>
@@ -773,7 +832,7 @@ export default function Home() {
                 <option value="export-failure">Export failure</option>
                 <option value="screenshot-safe">Screenshot-safe</option>
               </select>
-              <p className="state-copy">{trustStateCopy(trustState)}</p>
+              <p className="state-copy">{isVaultLocked ? "Vault password is required before reveal, copy, rotate, import, or export. The password itself is never stored." : trustStateCopy(trustState)}</p>
             </section>
 
             <section className="rail-panel">
@@ -858,6 +917,7 @@ export default function Home() {
               <form className="stack-form" onSubmit={createVault}>
                 <label>Vault name<input aria-label="New vault name" value={vaultForm.name} onChange={(event) => setVaultForm({ ...vaultForm, name: event.target.value })} /></label>
                 <label>Environment<input aria-label="New vault environment" value={vaultForm.environment} onChange={(event) => setVaultForm({ ...vaultForm, environment: event.target.value })} /></label>
+                <label>Vault password<input aria-label="New vault password" type="password" minLength={6} maxLength={20} value={vaultForm.password} onChange={(event) => setVaultForm({ ...vaultForm, password: event.target.value })} /></label>
                 <button type="submit" disabled={!login || !selectedProjectId}>Create Vault</button>
               </form>
             )}

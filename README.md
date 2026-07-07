@@ -6,6 +6,7 @@ The MVP focuses on a small, auditable workflow:
 
 - organize projects and vaults;
 - keep secret values masked by default;
+- unlock vaults with a user-provided password that is never stored;
 - explicitly reveal or copy secrets through audited actions;
 - rotate secret values without exposing prior versions;
 - preview `.env` imports before applying valid, duplicate, and invalid rows;
@@ -15,7 +16,7 @@ This repository is built for fast prototype validation, fundraising demos, and f
 
 ## Status
 
-Prototype MVP. The web app and API routes use demo-safe local state for validation. The package boundaries, Prisma schema, crypto helpers, CLI boundary, and documentation are in place so the project can move toward durable storage and deployment hardening.
+Prototype MVP. The web app and API routes use an encrypted in-memory store for local validation: vault passwords derive short-lived symmetric keys, secret values are saved as AES-256-GCM payloads, and the password is not stored. The package boundaries, Prisma schema, crypto helpers, CLI boundary, and documentation are in place so the project can move toward durable storage and deployment hardening.
 
 ## Monorepo Layout
 
@@ -45,7 +46,7 @@ pnpm db:generate
 pnpm dev
 ```
 
-Open `http://localhost:3000`, click `Login`, and use the demo workspace. The seeded browser data uses fake values only.
+Open `http://localhost:3000`, click `Login`, and unlock the demo vault with `demo123`. The seeded browser data uses fake values only.
 
 For a complete local setup, including database notes and verification commands, see [docs/local-dev.md](docs/local-dev.md).
 
@@ -61,6 +62,7 @@ pnpm db:generate                 # Generate Prisma client
 pnpm db:migrate                  # Run local Prisma migrations
 pnpm db:seed                     # Seed demo data
 pnpm sm projects                 # Use the local CLI helper
+pnpm sm unlock proj_demo --password demo123
 ```
 
 ## Web Workbench
@@ -81,11 +83,12 @@ The CLI talks to the local HTTP app and is intentionally narrow:
 
 ```bash
 SECRET_MANAGER_URL=http://localhost:3000 pnpm sm projects
-SECRET_MANAGER_TOKEN=sm_fake_read_token pnpm sm get proj_demo STRIPE_API_KEY
-SECRET_MANAGER_TOKEN=sm_fake_read_token pnpm sm export proj_demo --format env
+SECRET_MANAGER_URL=http://localhost:3000 pnpm sm unlock proj_demo --password demo123
+SECRET_MANAGER_TOKEN=sm_tmp_... pnpm sm get proj_demo STRIPE_API_KEY
+SECRET_MANAGER_TOKEN=sm_tmp_... pnpm sm export proj_demo --format env
 ```
 
-`projects` lists metadata only. `get` and `export` are the only commands that print plaintext and require a read-scoped local API token.
+`projects` lists metadata only. `unlock` verifies the vault password and prints a temporary token. `get` and `export` are the only commands that print plaintext and require `SECRET_MANAGER_TOKEN`.
 
 ## API Surface
 
@@ -94,7 +97,7 @@ The current route handlers cover project, vault, secret, import, export, audit, 
 ## Security Rules
 
 - Do not commit `.env`, `.env.local`, real credentials, production exports, screenshots containing real secrets, or usable API tokens.
-- `SM_MASTER_KEY` must be supplied by the local environment or deployment secret store. The repository only includes placeholder variable names.
+- Vault passwords must be 6-20 characters and are never stored.
 - Demo and test data must use fake values only, such as `demo-provider-secret-value`.
 - Secret plaintext should only exist during explicit request handling paths such as reveal, copy, API read, or local CLI output.
 - Logs, audit records, comments, fixtures, screenshots, and docs must not contain real secret values.

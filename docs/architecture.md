@@ -12,16 +12,17 @@ SecretManager starts as a single TypeScript workspace with explicit package boun
 
 ## Secret Handling
 
-Secret values are encrypted by `packages/crypto` using envelope encryption:
+The running web MVP encrypts secret values with a password-derived vault key:
 
-1. Generate a random data-encryption key per secret version.
-2. Encrypt the secret value with AES-256-GCM using that data key.
-3. Encrypt the data key with `SM_MASTER_KEY`.
-4. Persist only ciphertext, nonce, encrypted DEK, auth tags, key version, and non-sensitive metadata.
+1. User sets or enters a 6-20 character vault password.
+2. The service derives a 32-byte symmetric key with `scrypt`.
+3. Secret values are encrypted with AES-256-GCM.
+4. The service stores ciphertext, nonce, auth tag, masked metadata, version metadata, and non-sensitive metadata.
+5. The password is not stored; the derived key is cached briefly in memory while the vault is unlocked.
 
 Application code should call service interfaces. UI and route handlers must not assemble crypto primitives directly.
 
-The current web route handlers still use a demo-safe in-memory store with fake data for UI validation. The encrypted persistence schema and crypto package are ready as the boundary for the next hardening step. See [security-design.md](security-design.md) for the detailed algorithm, storage format, plaintext boundary, and production hardening checklist.
+The current web route handlers use an encrypted in-memory store for local operation. The next hardening step is wiring the encrypted payload shape to Prisma persistence. See [security-design.md](security-design.md) for the detailed algorithm, storage format, plaintext boundary, and production hardening checklist.
 
 ## API Shape
 

@@ -75,6 +75,24 @@ export class SecretManagerClient {
     return this.request(`/api/v1/vaults/${encodeURIComponent(vaultId)}/secrets/${encodeURIComponent(key)}`);
   }
 
+  async issueTemporaryToken(input: {
+    vaultId: string;
+    password: string;
+  }): Promise<{
+    token: string;
+    tokenRecord: {
+      tokenPrefix: string;
+      vaultId: string;
+      scopes: string[];
+      expiresAt: string;
+    };
+  }> {
+    return this.request(`/api/vaults/${encodeURIComponent(input.vaultId)}/temporary-token`, {
+      method: "POST",
+      body: JSON.stringify({ password: input.password })
+    });
+  }
+
   async upsertSecret(input: {
     vaultId: string;
     key: string;

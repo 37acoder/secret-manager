@@ -3,16 +3,13 @@ import {
   toDeveloperApiError,
   toDeveloperApiSuccess
 } from "../../../../../../../../packages/core/src/developer-api";
-import { developerApi } from "../../../../../../lib/developer-api-store";
+import { secretService } from "../../../../../../lib/secret-service";
 
 export async function GET(request: Request, context: { params: Promise<{ vaultId: string }> }) {
   const requestId = createRequestId();
   try {
     const params = await context.params;
-    const data = await developerApi.listSecrets({
-      token: bearerToken(request),
-      vaultId: params.vaultId
-    });
+    const data = secretService.listSecretsWithToken(params.vaultId, bearerToken(request));
     return json(toDeveloperApiSuccess(requestId, { secrets: data }));
   } catch (error) {
     return json(toDeveloperApiError(requestId, error));
@@ -23,14 +20,7 @@ export async function POST(request: Request, context: { params: Promise<{ vaultI
   const requestId = createRequestId();
   try {
     const params = await context.params;
-    const body = await request.json() as { key?: unknown; value?: unknown };
-    const data = await developerApi.upsertSecret({
-      token: bearerToken(request),
-      vaultId: params.vaultId,
-      key: body.key as string,
-      value: body.value as string
-    });
-    return json(toDeveloperApiSuccess(requestId, data, 201));
+    return json(toDeveloperApiError(requestId, new Error("Temporary CLI tokens are read-only.")));
   } catch (error) {
     return json(toDeveloperApiError(requestId, error));
   }

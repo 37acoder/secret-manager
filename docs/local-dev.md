@@ -24,11 +24,12 @@ With the web app running:
 
 ```bash
 SECRET_MANAGER_URL=http://localhost:3000 pnpm sm projects
-SECRET_MANAGER_TOKEN=sm_fake_read_token pnpm sm get proj_demo STRIPE_API_KEY
-SECRET_MANAGER_TOKEN=sm_fake_read_token pnpm sm export proj_demo --format env
+SECRET_MANAGER_URL=http://localhost:3000 pnpm sm unlock proj_demo --password demo123
+SECRET_MANAGER_TOKEN=sm_tmp_... pnpm sm get proj_demo STRIPE_API_KEY
+SECRET_MANAGER_TOKEN=sm_tmp_... pnpm sm export proj_demo --format env
 ```
 
-Use a read-scoped local API token for `get` and `export`. Plaintext export is intended for local demo validation only and should not be committed, pasted into issues/chat, or captured in screenshots.
+Use `sm unlock` to exchange the vault password for a temporary read token. Plaintext export is intended for local demo validation only and should not be committed, pasted into issues/chat, or captured in screenshots.
 
 ## Database
 

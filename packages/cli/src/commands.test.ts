@@ -28,7 +28,7 @@ const projects = {
 const vaults = {
   requestId: "req_vaults",
   data: {
-    vaults: [{ id: "vault_demo", projectId: "proj_demo", name: "Production", environment: "prod", secretCount: 1, updatedAt: "now" }]
+    vaults: [{ id: "vault_demo", projectId: "proj_demo", name: "Production", environment: "prod", secretCount: 1, updatedAt: "now", locked: true }]
   }
 };
 
@@ -64,6 +64,34 @@ describe("sm cli", () => {
     expect(result).toEqual({ exitCode: 0, stderr: "", stdout: "demo-provider-secret-value\n" });
   });
 
+  it("issues a temporary token from the vault password", async () => {
+    const result = await runCli(["unlock", "proj_demo", "--password", "demo123"], {
+      env: { SECRET_MANAGER_URL: "http://localhost:3000" },
+      fetchImpl: fetchMock({
+        "/api/projects": projects,
+        "/api/projects/proj_demo/vaults": vaults,
+        "/api/vaults/vault_demo/temporary-token": {
+          token: "sm_tmp_demo",
+          tokenRecord: {
+            tokenPrefix: "sm_tmp_demo",
+            vaultId: "vault_demo",
+            scopes: ["read_secrets"],
+            expiresAt: "2026-07-07T07:30:00.000Z"
+          }
+        }
+      })
+    });
+
+    expect(result).toEqual({
+      exitCode: 0,
+      stderr: "",
+      stdout:
+        "SECRET_MANAGER_TOKEN=sm_tmp_demo\n" +
+        "expiresAt=2026-07-07T07:30:00.000Z\n" +
+        "Use this token for get/export. It is temporary and stored only as a hash plus in-memory decrypt key on the server.\n"
+    });
+  });
+
   it("exports explicit env output and quotes values that need it", async () => {
     const result = await runCli(["export", "vault_demo", "--format", "env"], {
       env: { SECRET_MANAGER_URL: "http://localhost:3000", SECRET_MANAGER_TOKEN: "sm_demo" },
@@ -88,7 +116,7 @@ describe("sm cli", () => {
   it("returns clear locked vault and unsupported export errors", async () => {
     await expect(runCli(["get", "proj_demo", "STRIPE_API_KEY"], { env: {} })).resolves.toMatchObject({
       exitCode: 1,
-      stderr: "Vault is locked: set SECRET_MANAGER_TOKEN to a read-scoped API token for get/export.\n"
+      stderr: "Vault is locked: run sm unlock PROJECT --password PASSWORD and set SECRET_MANAGER_TOKEN for get/export.\n"
     });
 
     await expect(

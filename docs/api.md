@@ -62,12 +62,13 @@ Returns vault metadata for a project.
 
 ### `POST /api/projects/:projectId/vaults`
 
-Creates a vault.
+Creates a vault. Password must be 6-20 characters and is used to derive the vault encryption key. The password is not stored.
 
 ```json
 {
   "name": "Customer Demo",
-  "environment": "staging"
+  "environment": "staging",
+  "password": "demo123"
 }
 ```
 
@@ -82,6 +83,26 @@ Updates vault metadata.
 ### `DELETE /api/vaults/:vaultId`
 
 Deletes a vault and records audit evidence.
+
+### `POST /api/vaults/:vaultId/unlock`
+
+Unlocks a vault for the current process by deriving the vault key from the supplied password and caching it briefly in memory.
+
+```json
+{ "password": "demo123" }
+```
+
+### `POST /api/vaults/:vaultId/lock`
+
+Clears the cached vault key.
+
+### `POST /api/vaults/:vaultId/temporary-token`
+
+Verifies the vault password and returns a temporary read token for CLI access.
+
+```json
+{ "password": "demo123" }
+```
 
 ## Secrets
 

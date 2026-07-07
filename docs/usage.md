@@ -4,7 +4,7 @@ This guide describes the current SecretManager MVP workflows from the web workbe
 
 Use fake/demo values while the project is a prototype. Do not paste real credentials into the web UI, CLI, issue comments, chat, docs, tests, logs, or screenshots.
 
-For encryption and storage details, read [security-design.md](security-design.md). The current web app uses a fake in-memory demo store; the crypto package and Prisma schema define the intended encrypted persistence boundary for hardening.
+For encryption and storage details, read [security-design.md](security-design.md). The current web app stores encrypted secret payloads in a local in-memory store; production hardening still needs Prisma persistence, authentication, authorization, backup, and recovery work.
 
 ## Start The Web App
 
@@ -23,7 +23,7 @@ Open `http://localhost:3000`.
 2. The app loads the demo project and the default vault.
 3. The main table shows masked values only.
 
-The current web session is demo-safe. It is designed to validate flows, not to store real production secrets.
+The default demo vault password is `demo123`. The current web session is demo-safe. It is designed to validate flows, not to store real production secrets.
 
 ## Navigate Projects And Vaults
 
@@ -34,6 +34,16 @@ Use the left rail:
 - The central table updates when a vault is selected.
 
 Use `+` next to `Projects` or `Vaults` to create a new item. Creation happens in a drawer so the workbench remains focused on secret management.
+
+Vault creation requires a 6-20 character password. The password is used to derive the vault encryption key and is not stored.
+
+## Unlock And Lock A Vault
+
+1. Select a vault.
+2. Enter the vault password.
+3. Click `Unlock vault`.
+
+The server caches the derived decrypt key briefly in memory. `Lock vault` clears that key. The browser also calls the lock endpoint when the page is left.
 
 ## Add A Secret
 
@@ -131,12 +141,14 @@ With the web app running:
 
 ```bash
 SECRET_MANAGER_URL=http://localhost:3000 pnpm sm projects
-SECRET_MANAGER_TOKEN=sm_fake_read_token pnpm sm get proj_demo STRIPE_API_KEY
-SECRET_MANAGER_TOKEN=sm_fake_read_token pnpm sm export proj_demo --format env
+SECRET_MANAGER_URL=http://localhost:3000 pnpm sm unlock proj_demo --password demo123
+SECRET_MANAGER_TOKEN=sm_tmp_... pnpm sm get proj_demo STRIPE_API_KEY
+SECRET_MANAGER_TOKEN=sm_tmp_... pnpm sm export proj_demo --format env
 ```
 
 CLI safety:
 
 - `projects` prints metadata only.
+- `unlock` verifies the vault password and prints a temporary token.
 - `get` and `export` print plaintext and require `SECRET_MANAGER_TOKEN`.
 - CLI plaintext output is local-only and must not be committed or pasted into shared systems.

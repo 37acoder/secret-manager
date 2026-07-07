@@ -19,10 +19,10 @@
 
 ## Required Controls
 
-- `SM_MASTER_KEY` is configured only through environment/deployment secrets.
-- Database backups contain ciphertext only; the master key must be backed up separately by Infra.
+- Vault passwords are never stored; only encrypted verifier payloads are stored.
+- Database backups contain ciphertext only; vault passwords are required separately to decrypt values.
 - Logs must use redaction helpers and avoid request body logging.
-- API tokens are stored as hashes with a display prefix; full tokens are shown once.
+- CLI temporary tokens are stored as hashes with a display prefix and short in-memory decrypt key; full tokens are shown once.
 - Demo data must be fake and safe to disclose.
 
 See [security-design.md](security-design.md) for the detailed AES-256-GCM envelope encryption method, persisted field shape, redaction boundary, audit rules, and current prototype limitations.

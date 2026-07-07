@@ -21,12 +21,13 @@ const helpText = `SecretManager CLI
 
 Usage:
   sm projects
+  sm unlock PROJECT --password PASSWORD
   sm get PROJECT KEY
   sm export PROJECT --format env
 
 Environment:
   SECRET_MANAGER_URL     Base URL for the local SecretManager app, defaults to http://localhost:3000
-  SECRET_MANAGER_TOKEN   Read-scoped API token for get/export
+  SECRET_MANAGER_TOKEN   Temporary read token returned by sm unlock
 `;
 
 export async function runCli(argv: string[], io: CliIO): Promise<CliResult> {
@@ -46,6 +47,23 @@ export async function runCli(argv: string[], io: CliIO): Promise<CliResult> {
 
     if (command === "projects") {
       return ok(await formatProjects(client));
+    }
+
+    if (command === "unlock") {
+      const project = requiredArg(argv[1], "Missing project or vault. Usage: sm unlock PROJECT --password PASSWORD");
+      const password = optionValue(argv, "--password");
+      if (!password) {
+        throw new CliError("Missing vault password. Usage: sm unlock PROJECT --password PASSWORD", 2);
+      }
+      const vault = await resolveVault(client, project);
+      const response = await client.issueTemporaryToken({ vaultId: vault.id, password });
+      return ok(
+        [
+          `SECRET_MANAGER_TOKEN=${response.token}`,
+          `expiresAt=${response.tokenRecord.expiresAt}`,
+          "Use this token for get/export. It is temporary and stored only as a hash plus in-memory decrypt key on the server."
+        ].join("\n") + "\n"
+      );
     }
 
     if (command === "get") {
@@ -130,7 +148,7 @@ function requiredArg(value: string | undefined, message: string): string {
 
 function requireToken(token: string | undefined): void {
   if (!token) {
-    throw new CliError("Vault is locked: set SECRET_MANAGER_TOKEN to a read-scoped API token for get/export.", 1);
+    throw new CliError("Vault is locked: run sm unlock PROJECT --password PASSWORD and set SECRET_MANAGER_TOKEN for get/export.", 1);
   }
 }
 
@@ -151,7 +169,7 @@ function toCliMessage(error: unknown): string {
   if (error instanceof CliError) return error.message;
   if (error instanceof Error) {
     const code = (error as Error & { code?: string }).code;
-    if (code === "missing_token") return "Vault is locked: set SECRET_MANAGER_TOKEN to a read-scoped API token.";
+    if (code === "missing_token") return "Vault is locked: run sm unlock PROJECT --password PASSWORD and set SECRET_MANAGER_TOKEN.";
     if (code === "invalid_token") return "Bad credentials: API token is invalid.";
     if (code === "token_revoked") return "Bad credentials: API token has been revoked.";
     if (code === "token_expired") return "Bad credentials: API token has expired.";

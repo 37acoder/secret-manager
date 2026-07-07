@@ -498,6 +498,13 @@ label {
   justify-self: center;
 }
 
+.unlock-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) auto;
+  gap: 10px;
+  justify-content: center;
+}
+
 .locked-state {
   background: repeating-linear-gradient(135deg, #fff, #fff 18px, #f7fafb 18px, #f7fafb 36px);
 }
