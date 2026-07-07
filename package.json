@@ -1,0 +1,20 @@
+{
+  "name": "secret-manager",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "dev": "pnpm --filter @secret-manager/web dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "sm": "node --experimental-strip-types packages/cli/src/index.ts",
+    "db:generate": "pnpm --filter @secret-manager/db db:generate",
+    "db:migrate": "pnpm --filter @secret-manager/db db:migrate",
+    "db:seed": "pnpm --filter @secret-manager/db db:seed"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

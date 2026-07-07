@@ -1,0 +1,218 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id          String       @id @default(cuid())
+  name        String       @unique
+  createdAt   DateTime     @default(now())
+  users       User[]
+  projects    Project[]
+  apiTokens   ApiToken[]
+  auditEvents AuditEvent[]
+}
+
+model User {
+  id           String       @id @default(cuid())
+  accountId    String
+  email        String       @unique
+  passwordHash String
+  role         UserRole
+  createdAt    DateTime     @default(now())
+  lastLoginAt  DateTime?
+  account      Account      @relation(fields: [accountId], references: [id])
+  sessions     Session[]
+  projects     Project[]
+  vaultGrants  VaultGrant[]
+  secrets      Secret[]
+  versions     SecretVersion[]
+  tokens       ApiToken[]
+  auditEvents  AuditEvent[]
+
+  @@index([accountId])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, expiresAt])
+}
+
+model Project {
+  id              String   @id @default(cuid())
+  accountId       String
+  name            String
+  slug            String
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  account         Account  @relation(fields: [accountId], references: [id])
+  createdBy       User     @relation(fields: [createdByUserId], references: [id])
+  vaults          Vault[]
+
+  @@unique([accountId, slug])
+}
+
+model Vault {
+  id          String       @id @default(cuid())
+  projectId   String
+  name        String
+  environment VaultEnvironment @default(dev)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  project     Project      @relation(fields: [projectId], references: [id])
+  grants      VaultGrant[]
+  secrets     Secret[]
+  apiTokens   ApiToken[]
+
+  @@unique([projectId, name, environment])
+  @@index([projectId])
+}
+
+model VaultGrant {
+  id              String    @id @default(cuid())
+  vaultId         String
+  userId          String
+  role            VaultRole
+  createdByUserId String
+  createdAt       DateTime  @default(now())
+  vault           Vault     @relation(fields: [vaultId], references: [id])
+  user            User      @relation(fields: [userId], references: [id])
+
+  @@unique([vaultId, userId])
+  @@index([userId])
+}
+
+model Secret {
+  id               String          @id @default(cuid())
+  vaultId          String
+  key              String
+  description      String?
+  currentVersionId String?
+  createdByUserId  String
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  deletedAt        DateTime?
+  vault            Vault           @relation(fields: [vaultId], references: [id])
+  createdBy        User            @relation(fields: [createdByUserId], references: [id])
+  versions         SecretVersion[] @relation("SecretVersions")
+  currentVersion   SecretVersion?  @relation("CurrentSecretVersion", fields: [currentVersionId], references: [id])
+
+  @@unique([currentVersionId])
+  @@index([vaultId])
+  @@index([vaultId, key])
+}
+
+model SecretVersion {
+  id                   String   @id @default(cuid())
+  secretId             String
+  versionNumber        Int
+  ciphertext           String
+  nonce                String
+  authTag              String
+  encryptedDek         String
+  dekNonce             String
+  dekAuthTag           String
+  encryptionKeyVersion String
+  contentType          SecretContentType @default(text)
+  fingerprint          String?
+  createdByUserId      String
+  createdAt            DateTime @default(now())
+  secret               Secret   @relation("SecretVersions", fields: [secretId], references: [id])
+  currentForSecret     Secret?  @relation("CurrentSecretVersion")
+  createdBy            User     @relation(fields: [createdByUserId], references: [id])
+
+  @@unique([secretId, versionNumber])
+  @@index([createdByUserId])
+}
+
+model ApiToken {
+  id              String    @id @default(cuid())
+  accountId       String
+  vaultId         String?
+  name            String
+  tokenPrefix     String
+  tokenHash       String    @unique
+  scopes          String
+  expiresAt       DateTime?
+  lastUsedAt      DateTime?
+  revokedAt       DateTime?
+  createdByUserId String
+  createdAt       DateTime  @default(now())
+  account         Account   @relation(fields: [accountId], references: [id])
+  vault           Vault?    @relation(fields: [vaultId], references: [id])
+  createdBy       User      @relation(fields: [createdByUserId], references: [id])
+  auditEvents     AuditEvent[]
+
+  @@index([accountId])
+  @@index([vaultId])
+}
+
+model AuditEvent {
+  id            String   @id @default(cuid())
+  accountId     String
+  actorType     AuditActorType
+  actorUserId   String?
+  actorTokenId  String?
+  action        String
+  targetType    String
+  targetId      String
+  outcome       String
+  metadataJson  String
+  requestId     String
+  createdAt     DateTime @default(now())
+  account       Account  @relation(fields: [accountId], references: [id])
+  actorUser     User?    @relation(fields: [actorUserId], references: [id])
+  actorToken    ApiToken? @relation(fields: [actorTokenId], references: [id])
+
+  @@index([accountId, createdAt])
+  @@index([targetType, targetId, createdAt])
+  @@index([actorUserId])
+  @@index([actorTokenId])
+}
+
+enum UserRole {
+  owner
+  admin
+  member
+}
+
+enum VaultRole {
+  owner
+  editor
+  viewer
+}
+
+enum VaultEnvironment {
+  dev
+  staging
+  prod
+  custom
+}
+
+enum SecretContentType {
+  text
+  json
+  env
+}
+
+enum ApiTokenScope {
+  read_secrets
+  write_secrets
+  manage_tokens
+}
+
+enum AuditActorType {
+  user
+  api_token
+  system
+}

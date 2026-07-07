@@ -1,0 +1,12 @@
+import { jsonError, jsonOk, readJson } from "@/lib/api-response";
+import { secretService } from "@/lib/secret-service";
+
+export async function POST(request: Request, { params }: { params: Promise<{ vaultId: string }> }) {
+  try {
+    const { vaultId } = await params;
+    const body = await readJson(request);
+    return jsonOk({ preview: secretService.previewImport(vaultId, body) });
+  } catch (error) {
+    return jsonError(error);
+  }
+}

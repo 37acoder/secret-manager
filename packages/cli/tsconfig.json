@@ -1,0 +1,8 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "outDir": "dist"
+  },
+  "include": ["src/**/*.ts", "../api-client/src/**/*.ts"]
+}
