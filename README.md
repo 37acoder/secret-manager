@@ -118,6 +118,7 @@ The Playwright suite covers the workbench first viewport, hidden permanent forms
 
 - [Usage guide](docs/usage.md)
 - [API reference](docs/api.md)
+- [Security design](docs/security-design.md)
 - [Architecture](docs/architecture.md)
 - [Local development](docs/local-dev.md)
 - [Threat model](docs/threat-model.md)

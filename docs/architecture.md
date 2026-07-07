@@ -21,6 +21,8 @@ Secret values are encrypted by `packages/crypto` using envelope encryption:
 
 Application code should call service interfaces. UI and route handlers must not assemble crypto primitives directly.
 
+The current web route handlers still use a demo-safe in-memory store with fake data for UI validation. The encrypted persistence schema and crypto package are ready as the boundary for the next hardening step. See [security-design.md](security-design.md) for the detailed algorithm, storage format, plaintext boundary, and production hardening checklist.
+
 ## API Shape
 
 Initial REST boundaries follow the approved design and current MVP route handlers:

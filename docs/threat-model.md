@@ -24,3 +24,5 @@
 - Logs must use redaction helpers and avoid request body logging.
 - API tokens are stored as hashes with a display prefix; full tokens are shown once.
 - Demo data must be fake and safe to disclose.
+
+See [security-design.md](security-design.md) for the detailed AES-256-GCM envelope encryption method, persisted field shape, redaction boundary, audit rules, and current prototype limitations.

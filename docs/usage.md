@@ -4,6 +4,8 @@ This guide describes the current SecretManager MVP workflows from the web workbe
 
 Use fake/demo values while the project is a prototype. Do not paste real credentials into the web UI, CLI, issue comments, chat, docs, tests, logs, or screenshots.
 
+For encryption and storage details, read [security-design.md](security-design.md). The current web app uses a fake in-memory demo store; the crypto package and Prisma schema define the intended encrypted persistence boundary for hardening.
+
 ## Start The Web App
 
 ```bash
