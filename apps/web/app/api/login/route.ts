@@ -5,7 +5,7 @@ export async function POST(request: Request) {
   try {
     const body = await readJson(request);
     const actor = typeof body.email === "string" ? body.email : actorFrom(request);
-    return jsonOk(secretService.login(actor));
+    return jsonOk(await secretService.login(actor));
   } catch (error) {
     return jsonError(error);
   }

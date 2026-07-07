@@ -3,14 +3,14 @@ import { secretService } from "@/lib/secret-service";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
-  return jsonOk({ vaults: secretService.listVaults(projectId) });
+  return jsonOk({ vaults: await secretService.listVaults(projectId) });
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
   try {
     const { projectId } = await params;
     const body = await readJson(request);
-    return jsonOk({ vault: secretService.createVault(projectId, body, actorFrom(request)) }, 201);
+    return jsonOk({ vault: await secretService.createVault(projectId, body, actorFrom(request)) }, 201);
   } catch (error) {
     return jsonError(error);
   }

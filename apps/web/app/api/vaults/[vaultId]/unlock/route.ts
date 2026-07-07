@@ -5,7 +5,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ vau
   try {
     const { vaultId } = await params;
     const body = await readJson(request);
-    return jsonOk({ vault: secretService.unlockVault(vaultId, body, actorFrom(request)) });
+    return jsonOk({ vault: await secretService.unlockVault(vaultId, body, actorFrom(request)) });
   } catch (error) {
     return jsonError(error);
   }

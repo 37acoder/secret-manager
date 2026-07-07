@@ -10,141 +10,237 @@ async function expectAuditAction(page: Page, action: string) {
     .toBe(true);
 }
 
-async function login(page: Page) {
+async function unlockVault(page: Page) {
   await page.goto("/");
-  await page.getByRole("button", { name: "Login" }).click();
-  await expect(page.getByText("Signed in to the demo workspace.")).toBeVisible({ timeout: 15_000 });
-  if (await page.getByLabel("Vault password").isVisible().catch(() => false)) {
-    await page.getByLabel("Vault password").fill("demo123");
-    await page.getByRole("button", { name: "Unlock vault" }).click();
-    await expect(page.getByText(/Vault .+ unlocked for this session\./)).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Production|保险库工作台/ })).toBeVisible();
+  const entryState = await Promise.race([
+    page.getByLabel(/Vault password|保险库密码/).waitFor({ state: "visible", timeout: 10_000 }).then(() => "locked" as const),
+    page.getByRole("table", { name: /Secrets|密钥/ }).waitFor({ state: "visible", timeout: 10_000 }).then(() => "unlocked" as const)
+  ]);
+  if (entryState === "locked") {
+    await page.getByLabel(/Vault password|保险库密码/).fill("demo123");
+    await page.getByRole("button", { name: "解锁保险库" }).click();
+    await expect(page.getByText(/保险库 .+ 已在当前浏览器会话中解锁。/)).toBeVisible();
   }
+  await expect(page.getByRole("table", { name: /Secrets|密钥/ })).toBeVisible({ timeout: 15_000 });
 }
 
-async function createVault(page: Page, name: string, environment: string) {
-  await page.getByLabel("New vault").click();
-  await page.getByLabel("New vault name").fill(name);
-  await page.getByLabel("New vault environment").fill(environment);
-  await page.getByLabel("New vault password").fill("demo123");
-  await page.getByRole("dialog", { name: "Focused edit drawer" }).getByRole("button", { name: "Create Vault" }).click();
-  await expect(page.getByText(`Vault ${name} created.`)).toBeVisible();
+test.beforeEach(async ({ page }) => {
+  await page.request.post("/api/demo/reset");
+});
+
+async function createVault(page: Page, name: string) {
+  await page.getByLabel(/New vault|新建保险库/).click();
+  await page.getByLabel(/New vault name|新保险库名称/).fill(name);
+  await page.getByLabel(/New vault password|新保险库密码/).fill("demo123");
+  await page.getByRole("dialog", { name: /Focused edit drawer|聚焦编辑抽屉/ }).getByRole("button", { name: "创建保险库" }).click();
+  await expect(page.getByText(`保险库 ${name} 已创建。`)).toBeVisible();
 }
 
 async function createSecret(page: Page, key: string, value: string, description: string) {
-  await page.locator(".toolbar").getByRole("button", { name: "Add secret" }).click();
-  await page.getByLabel("New secret key").fill(key);
-  await page.getByLabel("New secret value").fill(value);
-  await page.getByLabel("New secret description").fill(description);
-  await page.getByRole("dialog", { name: "Focused edit drawer" }).getByRole("button", { name: "Add secret" }).click();
-  await expect(page.getByText(`Secret ${key} created with a masked default view.`)).toBeVisible();
+  await page.locator(".toolbar").getByRole("button", { name: "新增密钥" }).click();
+  await page.getByLabel(/New secret key|新密钥名/).fill(key);
+  await page.getByLabel(/New secret value|新密钥值/).fill(value);
+  await page.getByLabel(/New secret description|新密钥描述/).fill(description);
+  await page.getByRole("dialog", { name: /Focused edit drawer|聚焦编辑抽屉/ }).getByRole("button", { name: "新增密钥" }).click();
+  await expect(page.getByText(`密钥 ${key} 已创建，默认以脱敏值显示。`)).toBeVisible();
 }
 
 test("workbench hides permanent forms while supporting secret create reveal copy rotate and delete", async ({ page }) => {
-  await login(page);
+  await unlockVault(page);
 
-  await expect(page.getByRole("table", { name: "Secrets" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Add secret" })).toBeVisible();
-  await expect(page.getByLabel("New secret key")).toHaveCount(0);
+  await expect(page.getByRole("table", { name: /Secrets|密钥/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "新增密钥" })).toBeVisible();
+  await expect(page.getByLabel(/New secret key|新密钥名/)).toHaveCount(0);
 
-  await page.getByLabel("New project").click();
-  await page.getByLabel("New project name").fill("QA Project");
-  await page.getByLabel("New project description").fill("QA acceptance project");
-  await page.getByRole("button", { name: "Create Project" }).click();
-  await expect(page.getByText("Project QA Project created.")).toBeVisible();
-
-  await createVault(page, "QA Demo Vault", "qa");
+  await createVault(page, "QA Demo Vault");
   await createSecret(page, "DEMO_SECRET", "super-sensitive-demo-value", "End-to-end demo secret");
 
   await expect(page.getByTestId("masked-DEMO_SECRET")).toBeVisible();
   await expect(page.getByText("super-sensitive-demo-value")).toHaveCount(0);
 
-  await page.locator(".toolbar").getByRole("button", { name: "Add secret" }).click();
-  await page.getByLabel("New secret key").fill("DEMO_SECRET");
-  await expect(page.getByText("Duplicate secret key in this environment.")).toBeVisible();
-  await page.getByLabel("Close drawer").click();
+  await page.locator(".toolbar").getByRole("button", { name: "新增密钥" }).click();
+  await page.getByLabel(/New secret key|新密钥名/).fill("DEMO_SECRET");
+  await expect(page.getByText("当前保险库已有同名密钥。")).toBeVisible();
+  await page.getByLabel(/Close drawer|关闭抽屉/).click();
 
-  await page.getByRole("row", { name: /DEMO_SECRET/ }).getByRole("button", { name: "Reveal" }).click();
-  await expect(page.getByTestId("revealed-value")).toHaveText("super-sensitive-demo-value");
+  await page.getByRole("row", { name: /DEMO_SECRET/ }).getByRole("button", { name: "显示明文" }).click();
+  await expect(page.getByTestId("masked-DEMO_SECRET")).toHaveText("super-sensitive-demo-value");
   await expectAuditAction(page, "secret.reveal");
 
-  await page.getByRole("row", { name: /DEMO_SECRET/ }).getByRole("button", { name: "Copy" }).click();
-  await expect(page.getByText(/Secret copied|Clipboard unavailable/)).toBeVisible();
+  await page.getByRole("row", { name: /DEMO_SECRET/ }).getByRole("button", { name: "复制" }).click();
   await expectAuditAction(page, "secret.copy");
 
-  await page.getByRole("row", { name: /DEMO_SECRET/ }).getByRole("button", { name: "Rotate" }).click();
-  await page.getByLabel("Rotated secret value").fill("rotated-sensitive-demo-value");
-  await page.getByRole("dialog", { name: "Focused edit drawer" }).getByRole("button", { name: "Rotate secret" }).click();
-  await expect(page.getByText("Secret rotated to version 2.")).toBeVisible();
+  await page.getByRole("row", { name: /DEMO_SECRET/ }).getByRole("button", { name: "轮换" }).click();
+  await page.getByLabel(/Rotated secret value|轮换后的密钥值/).fill("rotated-sensitive-demo-value");
+  await page.getByRole("dialog", { name: /Focused edit drawer|聚焦编辑抽屉/ }).getByRole("button", { name: "轮换密钥" }).click();
+  await expect(page.getByText("密钥已轮换到版本 2。")).toBeVisible();
+  await page.getByRole("row", { name: /DEMO_SECRET/ }).getByRole("button", { name: "DEMO_SECRET" }).click();
   await expect(page.locator(".version-row").filter({ hasText: "v2" })).toBeVisible();
+  await page.getByLabel(/Close drawer|关闭抽屉/).click();
   await expectAuditAction(page, "secret.update");
   await expect(page.getByText("rotated-sensitive-demo-value")).toHaveCount(0);
 
-  await page.getByRole("row", { name: /DEMO_SECRET/ }).getByRole("button", { name: "Rotate" }).click();
-  await expect(page.getByRole("button", { name: "Delete", exact: true })).toBeDisabled();
-  await page.getByLabel("Delete confirmation key").fill("DEMO_SECRET");
-  await page.getByRole("button", { name: "Delete", exact: true }).click();
-  await expect(page.getByText("Secret deleted and audit event recorded.")).toBeVisible();
+  await page.getByRole("row", { name: /DEMO_SECRET/ }).getByRole("button", { name: "轮换" }).click();
+  await expect(page.getByRole("dialog", { name: /Focused edit drawer|聚焦编辑抽屉/ }).getByRole("button", { name: "删除", exact: true })).toHaveCount(0);
+  await page.getByLabel(/Close drawer|关闭抽屉/).click();
+
+  await page.getByRole("row", { name: /DEMO_SECRET/ }).getByRole("button", { name: "删除" }).click();
+  await page.getByLabel(/Delete confirmation key|删除确认密钥名/).fill("DEMO_SECRET");
+  await page.getByRole("dialog", { name: /Focused edit drawer|聚焦编辑抽屉/ }).getByRole("button", { name: "删除", exact: true }).click();
+  await expect(page.getByText("密钥已删除，并已写入审计记录。")).toBeVisible();
   await expectAuditAction(page, "secret.delete");
 });
 
+test("Chinese labels tooltips remove demo controls and selected detail avoids duplicated table fields", async ({ page }) => {
+  await unlockVault(page);
+
+  await expect(page.getByRole("button", { name: "新增密钥" })).toBeVisible();
+  await expect(page.getByLabel("保险库状态")).toBeVisible();
+  await expect(page.getByRole("button", { name: "重置演示数据" })).toHaveCount(0);
+  await expect(page.getByLabel(/演示状态 Trust state/)).toHaveCount(0);
+
+  await page.getByRole("button", { name: /保险库 Vaults 说明/ }).hover();
+  await expect(page.getByRole("tooltip", { name: /加密保存密钥的容器/ })).toBeVisible();
+
+  await page.getByRole("button", { name: /脱敏值 Masked value 说明/ }).focus();
+  await expect(page.getByRole("tooltip", { name: /默认隐藏真实值/ })).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: /操作状态 说明/ }).click();
+  await expect(page.getByRole("tooltip", { name: /是否可执行显示、复制、导入和导出/ })).toBeVisible();
+
+  await expect(page.getByRole("dialog", { name: /聚焦编辑抽屉|Focused edit drawer/ })).toHaveCount(0);
+  await page.getByRole("row", { name: /STRIPE_API_KEY/ }).getByRole("button", { name: "STRIPE_API_KEY" }).click();
+  const detailDrawer = page.getByLabel("密钥详情、版本审计与操作日志");
+  await expect(detailDrawer).toBeVisible();
+  await expect(detailDrawer.getByRole("button", { name: /复制|显示明文|轮换|删除/ })).toHaveCount(0);
+  await page.getByLabel(/Close drawer|关闭抽屉/).click();
+});
+
+test("reveal and copy do not shift the workbench vertically", async ({ page }) => {
+  await unlockVault(page);
+  const table = page.getByRole("table", { name: /Secrets|密钥/ });
+  const beforeReveal = await table.boundingBox();
+
+  await page.getByRole("row", { name: /STRIPE_API_KEY/ }).getByRole("button", { name: "显示明文" }).click();
+  await expect(page.getByTestId("masked-STRIPE_API_KEY")).not.toHaveText("显示明文后在此处短暂查看");
+  const afterReveal = await table.boundingBox();
+  expect(Math.abs((afterReveal?.y ?? 0) - (beforeReveal?.y ?? 0))).toBeLessThanOrEqual(1);
+
+  await page.getByRole("row", { name: /STRIPE_API_KEY/ }).getByRole("button", { name: "复制" }).click();
+  await expectAuditAction(page, "secret.copy");
+  const afterCopy = await table.boundingBox();
+  expect(Math.abs((afterCopy?.y ?? 0) - (afterReveal?.y ?? 0))).toBeLessThanOrEqual(1);
+});
+
 test("import wizard export warning and trust states meet MVP safety acceptance", async ({ page }) => {
-  await login(page);
-  await createVault(page, "Transfer QA Vault", "qa-transfer");
+  await unlockVault(page);
+  await createVault(page, "Transfer QA Vault");
   await createSecret(page, "STRIPE_API_KEY", "fake-existing-stripe", "Existing duplicate for import preview");
 
-  await page.getByRole("button", { name: "Import .env" }).click();
-  await page.getByLabel(".env import file").setInputFiles({
+  await page.getByRole("button", { name: "导入 .env" }).click();
+  await page.getByLabel(/.env import file|.env 导入文件/).setInputFiles({
     name: ".env",
     mimeType: "text/plain",
     buffer: Buffer.from("DEMO_IMPORT_ALPHA=fake-alpha\nSTRIPE_API_KEY=fake-duplicate\nBROKEN LINE")
   });
-  await expect(page.getByText("Loaded .env for preview.")).toBeVisible();
-  await page.getByRole("button", { name: "Preview Import" }).click();
-  await expect(page.getByTestId("import-preview")).toContainText("1 valid");
-  await expect(page.getByTestId("import-preview")).toContainText("1 duplicate");
-  await expect(page.getByTestId("import-preview")).toContainText("1 invalid");
+  await expect(page.getByText("已加载 .env，可进行预览。")).toBeVisible();
+  await page.getByRole("button", { name: "预览导入" }).click();
+  await expect(page.getByTestId("import-preview")).toContainText("1 有效");
+  await expect(page.getByTestId("import-preview")).toContainText("1 重复");
+  await expect(page.getByTestId("import-preview")).toContainText("1 无效");
   await expect(page.getByTestId("import-preview")).not.toContainText("fake-alpha");
 
-  await page.getByRole("button", { name: "Apply Import" }).click();
-  await expect(page.getByText("Import applied: 1 created, 0 updated, 1 skipped.")).toBeVisible();
-  await page.getByLabel("Close transfer flow").click();
+  await page.getByRole("button", { name: "应用导入" }).click();
+  await expect(page.getByText("导入已应用：新增 1，更新 0，跳过 1。")).toBeVisible();
+  await page.getByLabel(/Close transfer flow|关闭导入导出流程/).click();
   await expect(page.getByRole("row", { name: /DEMO_IMPORT_ALPHA/ })).toBeVisible();
   await expectAuditAction(page, "secret.import");
 
-  await page.getByRole("button", { name: "Export" }).click();
-  await expect(page.getByTestId("export-warning")).toContainText("Do not paste exported files into issues, chat, docs, screenshots, or demo recordings.");
-  await page.getByRole("button", { name: "Export .env" }).click();
+  await page.getByRole("button", { name: "导出" }).click();
+  await expect(page.getByTestId("export-warning")).toContainText("不要把导出文件粘贴到任务、聊天、文档、截图或演示录屏中。");
+  await page.getByRole("button", { name: "导出 .env" }).click();
   await expect(page.getByText("Plaintext export requires explicit risk confirmation.")).toBeVisible();
 
-  await page.getByLabel("Plaintext export exposes secret values").check();
-  await page.getByRole("button", { name: "Export .env" }).click();
+  await page.getByLabel("明文导出会暴露密钥值").check();
+  await page.getByRole("button", { name: "导出 .env" }).click();
   await expect(page.getByTestId("export-result")).toContainText("Plaintext exports expose secret values");
+  await expect(page.getByTestId("export-result")).toContainText("明文文件已准备好，默认隐藏行内内容。");
+  await expect(page.getByTestId("export-result")).not.toContainText("DEMO_IMPORT_ALPHA=fake-alpha");
+  await page.getByTestId("export-result").getByRole("button", { name: "显示明文" }).click();
   await expect(page.getByTestId("export-result")).toContainText("DEMO_IMPORT_ALPHA=fake-alpha");
+  await page.getByTestId("export-result").getByRole("button", { name: "隐藏明文" }).click();
+  await expect(page.getByTestId("export-result")).not.toContainText("DEMO_IMPORT_ALPHA=fake-alpha");
   await expectAuditAction(page, "secret.export");
 
-  await page.getByRole("button", { name: "Encrypted Backup" }).click();
+  await page.getByRole("button", { name: "加密备份" }).click();
   await expect(page.getByTestId("export-result")).toContainText("deferred");
   await expect(page.getByTestId("export-result")).toContainText("AHO-48");
-  await page.getByLabel("Close transfer flow").click();
+  await page.getByLabel(/Close transfer flow|关闭导入导出流程/).click();
 
-  await page.getByRole("row", { name: /STRIPE_API_KEY/ }).getByRole("button", { name: "Reveal" }).click();
-  await expect(page.getByTestId("revealed-value")).toHaveText("fake-existing-stripe");
+  await page.getByRole("row", { name: /STRIPE_API_KEY/ }).getByRole("button", { name: "显示明文" }).click();
+  await expect(page.getByTestId("masked-STRIPE_API_KEY")).toHaveText("fake-existing-stripe");
   await expectAuditAction(page, "secret.reveal");
 
-  await page.getByLabel("Trust state").selectOption("screenshot-safe");
-  await expect(page.getByText("Screenshot-safe: values remain masked and reveal output is hidden.")).toBeVisible();
-  await expect(page.getByTestId("revealed-value")).toHaveText("Hidden until reveal");
-  await expect(page.getByText("fake-existing-stripe")).toHaveCount(0);
-  await expect(page.getByLabel("Vault context").getByRole("button", { name: "Reveal" })).toBeDisabled();
-  await expect(page.getByLabel("Vault context").getByRole("button", { name: "Copy" })).toBeDisabled();
+  await expect(page.getByRole("dialog", { name: /聚焦编辑抽屉|Focused edit drawer/ })).toHaveCount(0);
+  await page.getByRole("row", { name: /STRIPE_API_KEY/ }).getByRole("button", { name: "STRIPE_API_KEY" }).click();
+  await expect(page.getByLabel("密钥详情、版本审计与操作日志").getByRole("button", { name: "显示明文" })).toHaveCount(0);
+  await expect(page.getByLabel("密钥详情、版本审计与操作日志").getByRole("button", { name: "复制" })).toHaveCount(0);
+  await page.getByLabel(/Close drawer|关闭抽屉/).click();
 
-  await page.getByLabel("Trust state").selectOption("locked");
+  await page.getByRole("button", { name: "锁定保险库" }).click();
   await expect(page.getByTestId("locked-state")).toBeVisible();
-  await expect(page.getByText("Vault is locked")).toBeVisible();
-  await expect(page.locator(".toolbar").getByRole("button", { name: "Add secret" })).toBeDisabled();
-  await expect(page.locator(".toolbar").getByRole("button", { name: "Import .env" })).toBeDisabled();
+  await expect(page.getByText("保险库已锁定")).toBeVisible();
+  await expect(page.getByLabel(/保险库导航|Vault navigation/).getByText(/2 个密钥 \/ 已锁定/i)).toBeVisible();
+  await expect(page.getByLabel("保险库状态").locator(".status-pill.danger", { hasText: "已锁定 Locked" })).toBeVisible();
+  await expect(page.locator(".toolbar").getByRole("button", { name: "新增密钥" })).toBeDisabled();
+  await expect(page.locator(".toolbar").getByRole("button", { name: "导入 .env" })).toBeDisabled();
+  await expect(page.locator(".toolbar").getByRole("button", { name: "导出" })).toBeDisabled();
 
-  await page.getByLabel("Trust state").selectOption("demo-safe");
-  await expect(page.getByText("Demo-safe: fake provider keys and local sample data only.")).toBeVisible();
-  await expect(page.locator(".toolbar").getByRole("button", { name: "Add secret" })).toBeEnabled();
+  await page.getByLabel(/Vault password|保险库密码/).fill("demo123");
+  await page.getByRole("button", { name: "解锁保险库" }).click();
+  await expect(page.locator(".toolbar").getByRole("button", { name: "新增密钥" })).toBeEnabled();
+});
+
+test("fresh demo reset and session reload keep the unlocked vault usable", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByLabel(/保险库导航|Vault navigation/).getByRole("button", { name: /Demo Workspace/ })).toHaveCount(0);
+  await expect(page.getByText("QA Project")).toHaveCount(0);
+  await expect(page.getByTestId("locked-state")).toBeVisible();
+  await expect(page.getByRole("table", { name: /Secrets|密钥/ })).toHaveCount(0);
+  await expect(page.locator(".toolbar").getByRole("button", { name: "新增密钥" })).toBeDisabled();
+  await expect(page.locator(".toolbar").getByRole("button", { name: "导入 .env" })).toBeDisabled();
+  await expect(page.locator(".toolbar").getByRole("button", { name: "导出" })).toBeDisabled();
+
+  await unlockVault(page);
+  await expect(page.getByRole("table", { name: /Secrets|密钥/ })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("table", { name: /Secrets|密钥/ })).toBeVisible();
+  await expect(page.getByLabel(/保险库导航|Vault navigation/).getByText(/1 个密钥 \/ 已解锁/i)).toBeVisible();
+  await expect(page.locator(".toolbar").getByRole("button", { name: "新增密钥" })).toBeEnabled();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  await expect(page.getByRole("table", { name: /Secrets|密钥/ })).toBeVisible();
+  await expect(page.getByLabel("保险库状态")).toBeVisible();
+  await expect(page.locator(".toolbar").getByRole("button", { name: "新增密钥" })).toBeInViewport();
+  const authPanelTop = await page.getByRole("table", { name: /Secrets|密钥/ }).boundingBox();
+  const sidebarTop = await page.getByLabel(/保险库导航|Vault navigation/).boundingBox();
+  expect(authPanelTop?.y ?? 9999).toBeLessThan(sidebarTop?.y ?? 0);
+  await expect(page.locator(".toolbar").getByRole("button", { name: "新增密钥" })).toBeEnabled();
+});
+
+test("core workbench contains horizontal overflow inside components, not the page shell", async ({ page }) => {
+  await unlockVault(page);
+
+  for (const size of [
+    { width: 1280, height: 720 },
+    { width: 1440, height: 900 }
+  ]) {
+    await page.setViewportSize(size);
+    await expect(page.getByRole("table", { name: /Secrets|密钥/ })).toBeVisible();
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(1);
+  }
 });

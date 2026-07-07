@@ -76,16 +76,11 @@ type ExportResult = {
   nextStep?: string;
 };
 
-type LoginState = {
-  actor: string;
-  project: Project;
-};
-
-type TrustState = "demo-safe" | "locked" | "wrong-passphrase" | "storage-unavailable" | "export-failure" | "screenshot-safe";
-type DrawerMode = "new-project" | "new-vault" | "add-secret" | "rotate-secret" | null;
+type DrawerMode = "new-vault" | "add-secret" | "rotate-secret" | "delete-secret" | "secret-detail" | null;
 type TransferMode = "import" | "export" | null;
 
 const actorHeader = { "x-secret-manager-actor": "demo@37a.home" };
+const vaultPasswordSessionPrefix = "secret-manager:vault-password:";
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -120,25 +115,47 @@ function formatDateTime(value: string) {
   }).format(new Date(value));
 }
 
-function trustStateCopy(trustState: TrustState) {
-  switch (trustState) {
-    case "locked":
-      return "Vault locked. Re-authentication is required before reveal, copy, import, or export.";
-    case "wrong-passphrase":
-      return "Wrong passphrase. Check the passphrase and start a fresh demo session.";
-    case "storage-unavailable":
-      return "Storage unavailable. Changes are paused until local persistence returns.";
-    case "export-failure":
-      return "Export failed. No partial plaintext file was produced.";
-    case "screenshot-safe":
-      return "Screenshot-safe: values remain masked and reveal output is hidden.";
-    default:
-      return "Demo-safe: fake provider keys and local sample data only.";
+const copy = {
+  status: {
+    locked: "已锁定 Locked",
+    unlocked: "已解锁 Unlocked"
+  },
+  help: {
+    vault: "加密保存密钥的容器。",
+    secret: "API key、数据库连接串等敏感值。",
+    maskedValue: "默认隐藏真实值，只显示安全预览。",
+    operationState: "当前保险库是否可执行显示、复制、导入和导出。"
   }
+};
+
+function HelpTerm({ term, help }: { term: string; help: string }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <span className="help-term">
+      <button
+        className="help-trigger"
+        type="button"
+        aria-label={`${term} 说明`}
+        aria-expanded={open}
+        onBlur={() => setOpen(false)}
+        onClick={() => setOpen(true)}
+        onFocus={() => setOpen(true)}
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+      >
+        {term}
+      </button>
+      {open && (
+        <span className="help-tooltip" role="tooltip">
+          {help}
+        </span>
+      )}
+    </span>
+  );
 }
 
 export default function Home() {
-  const [login, setLogin] = useState<LoginState | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [vaults, setVaults] = useState<Vault[]>([]);
@@ -153,9 +170,8 @@ export default function Home() {
   const [error, setError] = useState("");
   const [drawerMode, setDrawerMode] = useState<DrawerMode>(null);
   const [transferMode, setTransferMode] = useState<TransferMode>(null);
-  const [projectForm, setProjectForm] = useState({ name: "Launch Validation", description: "Local prototype vaults" });
   const [projectEditForm, setProjectEditForm] = useState({ name: "", description: "" });
-  const [vaultForm, setVaultForm] = useState({ name: "Customer Demo", environment: "staging", password: "demo123" });
+  const [vaultForm, setVaultForm] = useState({ name: "Customer Demo", environment: "default", password: "demo123" });
   const [vaultEditForm, setVaultEditForm] = useState({ name: "", environment: "" });
   const [unlockPassword, setUnlockPassword] = useState("demo123");
   const [secretForm, setSecretForm] = useState({
@@ -170,7 +186,7 @@ export default function Home() {
   const [conflictStrategy, setConflictStrategy] = useState<"skip" | "overwrite">("skip");
   const [plaintextConfirmed, setPlaintextConfirmed] = useState(false);
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
-  const [trustState, setTrustState] = useState<TrustState>("demo-safe");
+  const [showPlaintextExport, setShowPlaintextExport] = useState(false);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId),
@@ -182,9 +198,11 @@ export default function Home() {
     [secrets, selectedSecretId]
   );
   const isVaultLocked = Boolean(selectedVault?.locked);
-  const isLocked = trustState === "locked" || isVaultLocked;
-  const isScreenshotSafe = trustState === "screenshot-safe";
-  const plaintextActionsBlocked = isLocked || isScreenshotSafe;
+  const isLocked = isVaultLocked;
+  const plaintextActionsBlocked = isLocked;
+  const canUseVault = Boolean(selectedVaultId && !isLocked);
+  const vaultStatusLabel = isLocked ? copy.status.locked : copy.status.unlocked;
+  const vaultStatusClass = isLocked ? "status-pill danger" : "status-pill safe";
   const recentAudit = auditEvents.slice(0, 5);
   const hasDuplicateDraft = secrets.some((secret) => {
     const keyMatches = secret.key.toLowerCase() === secretForm.key.trim().toLowerCase();
@@ -208,9 +226,29 @@ export default function Home() {
   async function loadSecrets(vaultId: string) {
     const data = await api<{ secrets: Secret[] }>(`/api/vaults/${vaultId}/secrets`);
     setSecrets(data.secrets);
-    setSelectedSecretId((current) => (data.secrets.some((secret) => secret.id === current) ? current : data.secrets[0]?.id || ""));
+    setSelectedSecretId((current) => (data.secrets.some((secret) => secret.id === current) ? current : ""));
     setRevealedValue("");
     return data.secrets;
+  }
+
+  function vaultPasswordSessionKey(vaultId: string) {
+    return `${vaultPasswordSessionPrefix}${vaultId}`;
+  }
+
+  function rememberVaultPassword(vaultId: string, password: string) {
+    try {
+      sessionStorage.setItem(vaultPasswordSessionKey(vaultId), password);
+    } catch {
+      setError("本地会话存储不可用。请保持当前页面打开，刷新后可能需要重新解锁。");
+    }
+  }
+
+  function forgetVaultPassword(vaultId: string) {
+    try {
+      sessionStorage.removeItem(vaultPasswordSessionKey(vaultId));
+    } catch {
+      // Session storage is best-effort only; the server-side lock remains authoritative.
+    }
   }
 
   async function loadVersions(secretId: string) {
@@ -242,9 +280,11 @@ export default function Home() {
     if (vaultToLoad) {
       const nextSecrets = await loadSecrets(vaultToLoad);
       const candidateSecretId = secretId || selectedSecretId;
-      const secretToLoad = nextSecrets.some((secret) => secret.id === candidateSecretId) ? candidateSecretId : nextSecrets[0]?.id;
+      const secretToLoad = nextSecrets.some((secret) => secret.id === candidateSecretId) ? candidateSecretId : "";
       if (secretToLoad) {
         await loadVersions(secretToLoad);
+      } else {
+        setVersions([]);
       }
     }
     await loadAuditEvents();
@@ -296,19 +336,30 @@ export default function Home() {
   }, [selectedVault]);
 
   useEffect(() => {
-    if (!selectedVaultId) return;
-    const lockSelectedVault = () => {
-      void fetch(`/api/vaults/${selectedVaultId}/lock`, {
+    if (!selectedVaultId || !selectedVault?.locked) return;
+    let cancelled = false;
+    try {
+      const savedPassword = sessionStorage.getItem(vaultPasswordSessionKey(selectedVaultId));
+      if (!savedPassword) return;
+      void api<{ vault: Vault }>(`/api/vaults/${selectedVaultId}/unlock`, {
         method: "POST",
-        keepalive: true,
-        headers: actorHeader
-      });
-    };
-    window.addEventListener("pagehide", lockSelectedVault);
+        body: JSON.stringify({ password: savedPassword })
+      })
+        .then(async (data) => {
+          if (cancelled) return;
+          await refresh(selectedProjectId, data.vault.id, selectedSecretId);
+          setNotice(`保险库 ${data.vault.name} 已从当前浏览器会话恢复。`);
+        })
+        .catch(() => {
+          forgetVaultPassword(selectedVaultId);
+        });
+    } catch {
+      setError("本地会话存储不可用。请保持当前页面打开，刷新后可能需要重新解锁。");
+    }
     return () => {
-      window.removeEventListener("pagehide", lockSelectedVault);
+      cancelled = true;
     };
-  }, [selectedVaultId]);
+  }, [selectedVaultId, selectedVault?.locked, selectedProjectId, selectedSecretId]);
 
   async function runAction(action: () => Promise<void>) {
     setError("");
@@ -343,46 +394,11 @@ export default function Home() {
     setError("");
     setNotice("");
     setExportResult(null);
+    setShowPlaintextExport(false);
     if (nextMode === "import") {
       setImportPreview(null);
     }
     setTransferMode(nextMode);
-  }
-
-  function changeTrustState(nextTrustState: TrustState) {
-    setTrustState(nextTrustState);
-    if (nextTrustState === "locked" || nextTrustState === "screenshot-safe") {
-      setRevealedValue("");
-      setExportResult(null);
-    }
-  }
-
-  async function loginDemo(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    await runAction(async () => {
-      const data = await api<LoginState>("/api/login", {
-        method: "POST",
-        body: JSON.stringify({ email: "demo@37a.home" })
-      });
-      setLogin(data);
-      const loadedProjects = projects.length ? projects : await loadProjects();
-      await refresh(data.project.id || loadedProjects[0].id);
-      setNotice("Signed in to the demo workspace.");
-    });
-  }
-
-  async function createProject(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    await runAction(async () => {
-      const data = await api<{ project: Project }>("/api/projects", {
-        method: "POST",
-        body: JSON.stringify(projectForm)
-      });
-      setSelectedProjectId(data.project.id);
-      await refresh(data.project.id);
-      closeDrawer();
-      setNotice(`Project ${data.project.name} created.`);
-    });
   }
 
   async function updateProject(event: FormEvent<HTMLFormElement>) {
@@ -395,22 +411,23 @@ export default function Home() {
       });
       await refresh(data.project.id, selectedVaultId, selectedSecretId);
       closeDrawer();
-      setNotice(`Project renamed to ${data.project.name}.`);
+      setNotice(`项目已重命名为 ${data.project.name}。`);
     });
   }
 
   async function createVault(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!login || !selectedProjectId) return;
+    if (!selectedProjectId) return;
     await runAction(async () => {
       const data = await api<{ vault: Vault }>(`/api/projects/${selectedProjectId}/vaults`, {
         method: "POST",
         body: JSON.stringify(vaultForm)
       });
+      rememberVaultPassword(data.vault.id, vaultForm.password);
       setSelectedVaultId(data.vault.id);
       await refresh(selectedProjectId, data.vault.id);
       closeDrawer();
-      setNotice(`Vault ${data.vault.name} created.`);
+      setNotice(`保险库 ${data.vault.name} 已创建。`);
     });
   }
 
@@ -422,8 +439,9 @@ export default function Home() {
         method: "POST",
         body: JSON.stringify({ password: unlockPassword })
       });
+      rememberVaultPassword(data.vault.id, unlockPassword);
       await refresh(selectedProjectId, data.vault.id, selectedSecretId);
-      setNotice(`Vault ${data.vault.name} unlocked for this session.`);
+      setNotice(`保险库 ${data.vault.name} 已在当前浏览器会话中解锁。`);
     });
   }
 
@@ -431,16 +449,18 @@ export default function Home() {
     if (!selectedVaultId) return;
     await runAction(async () => {
       const data = await api<{ vault: Vault }>(`/api/vaults/${selectedVaultId}/lock`, { method: "POST" });
+      forgetVaultPassword(data.vault.id);
       await refresh(selectedProjectId, data.vault.id, selectedSecretId);
       setRevealedValue("");
       setExportResult(null);
-      setNotice(`Vault ${data.vault.name} locked and in-memory key cleared.`);
+      setShowPlaintextExport(false);
+      setNotice(`保险库 ${data.vault.name} 已锁定，内存密钥已清除。`);
     });
   }
 
   async function updateVault(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!login || !selectedVaultId) return;
+    if (!selectedVaultId) return;
     await runAction(async () => {
       const data = await api<{ vault: Vault }>(`/api/vaults/${selectedVaultId}`, {
         method: "PATCH",
@@ -449,15 +469,15 @@ export default function Home() {
       setSelectedVaultId(data.vault.id);
       await refresh(selectedProjectId, data.vault.id, selectedSecretId);
       closeDrawer();
-      setNotice(`Vault renamed to ${data.vault.name}.`);
+      setNotice(`保险库已重命名为 ${data.vault.name}。`);
     });
   }
 
   async function createSecret(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!login || !selectedVaultId) return;
+    if (!selectedVaultId) return;
     if (hasDuplicateDraft) {
-      setError("Duplicate secret key in this environment. Rotate the existing row or choose another key.");
+      setError("当前保险库已有同名密钥。请轮换现有行或选择其他名称。");
       return;
     }
     await runAction(async () => {
@@ -472,16 +492,16 @@ export default function Home() {
       setSelectedSecretId(data.secret.id);
       await refresh(selectedProjectId, selectedVaultId, data.secret.id);
       closeDrawer();
-      setNotice(`Secret ${data.secret.key} created with a masked default view.`);
+      setNotice(`密钥 ${data.secret.key} 已创建，默认以脱敏值显示。`);
     });
   }
 
   async function revealSecret(secretId = selectedSecretId) {
     if (!secretId) return;
-    if (plaintextActionsBlocked) {
+    if (!canUseVault || plaintextActionsBlocked) {
       setRevealedValue("");
       setError("");
-      setNotice(isLocked ? "Vault is locked. Re-authenticate before revealing secrets." : "Screenshot-safe mode keeps reveal output hidden.");
+      setNotice("保险库已锁定。显示明文前请先输入保险库密码。");
       return;
     }
     await runAction(async () => {
@@ -489,15 +509,14 @@ export default function Home() {
       const data = await api<{ secret: { value: string } }>(`/api/secrets/${secretId}/reveal`, { method: "POST" });
       setRevealedValue(data.secret.value);
       await loadAuditEvents();
-      setNotice("Secret revealed and audit event recorded.");
     });
   }
 
   async function copySecret(secretId = selectedSecretId) {
     if (!secretId) return;
-    if (plaintextActionsBlocked) {
+    if (!canUseVault || plaintextActionsBlocked) {
       setError("");
-      setNotice(isLocked ? "Vault is locked. Re-authenticate before copying secrets." : "Screenshot-safe mode blocks copying plaintext.");
+      setNotice("保险库已锁定。复制前请先输入保险库密码。");
       return;
     }
     await runAction(async () => {
@@ -505,24 +524,23 @@ export default function Home() {
       const data = await api<{ secret: { value: string } }>(`/api/secrets/${secretId}/copy`, { method: "POST" });
       if (!navigator.clipboard?.writeText) {
         await loadAuditEvents();
-        setNotice("Clipboard unavailable. Copy was audited, but the value was not written to the clipboard.");
+        setNotice("剪贴板不可用。复制动作已审计，但值未写入剪贴板。");
         return;
       }
       try {
         await navigator.clipboard.writeText(data.secret.value);
       } catch {
         await loadAuditEvents();
-        setNotice("Clipboard unavailable. Copy was audited, but the value was not written to the clipboard.");
+        setNotice("剪贴板不可用。复制动作已审计，但值未写入剪贴板。");
         return;
       }
       await loadAuditEvents();
-      setNotice("Secret copied through the audited copy endpoint.");
     });
   }
 
   async function updateSecret(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!login || !selectedSecretId) return;
+    if (!canUseVault || !selectedSecretId) return;
     await runAction(async () => {
       const data = await api<{ secret: Secret }>(`/api/secrets/${selectedSecretId}`, {
         method: "PATCH",
@@ -531,29 +549,29 @@ export default function Home() {
       setUpdateValue(secretForm.value || updateValue);
       await refresh(selectedProjectId, data.secret.vaultId, data.secret.id);
       closeDrawer();
-      setNotice(`Secret rotated to version ${data.secret.version}.`);
+      setNotice(`密钥已轮换到版本 ${data.secret.version}。`);
     });
   }
 
   async function deleteSecret() {
-    if (!login || !selectedSecretId) return;
+    if (!canUseVault || !selectedSecretId) return;
     await runAction(async () => {
       if (deleteKeyConfirm !== selectedSecret?.key) {
-        throw new Error("Type the exact secret key before deleting.");
+        throw new Error("删除前请输入完整密钥名。");
       }
       await api(`/api/secrets/${selectedSecretId}`, { method: "DELETE" });
       await refresh(selectedProjectId, selectedVaultId);
       closeDrawer();
       setDeleteKeyConfirm("");
-      setNotice("Secret deleted and audit event recorded.");
+      setNotice("密钥已删除，并已写入审计记录。");
     });
   }
 
   async function previewImport() {
     if (!selectedVaultId) return;
-    if (isLocked) {
+    if (!canUseVault) {
       setError("");
-      setNotice("Vault is locked. Re-authenticate before importing secrets.");
+      setNotice("保险库已锁定。导入前请先输入保险库密码。");
       return;
     }
     await runAction(async () => {
@@ -562,15 +580,15 @@ export default function Home() {
         body: JSON.stringify({ content: importContent })
       });
       setImportPreview(data.preview);
-      setNotice("Import preview ready. Invalid and duplicate lines are shown before creation.");
+      setNotice("导入预览已生成，创建前会标出无效行和重复行。");
     });
   }
 
   async function loadImportFile(event: ChangeEvent<HTMLInputElement>) {
-    if (isLocked) {
+    if (!canUseVault) {
       event.target.value = "";
       setError("");
-      setNotice("Vault is locked. Re-authenticate before loading an import file.");
+      setNotice("保险库已锁定。加载导入文件前请先输入保险库密码。");
       return;
     }
     const file = event.target.files?.[0];
@@ -578,14 +596,14 @@ export default function Home() {
     setImportContent(await file.text());
     setImportPreview(null);
     setExportResult(null);
-    setNotice(`Loaded ${file.name} for preview.`);
+    setNotice(`已加载 ${file.name}，可进行预览。`);
   }
 
   async function applyImport() {
-    if (!login || !selectedVaultId) return;
-    if (isLocked) {
+    if (!selectedVaultId) return;
+    if (!canUseVault) {
       setError("");
-      setNotice("Vault is locked. Re-authenticate before importing secrets.");
+      setNotice("保险库已锁定。导入前请先输入保险库密码。");
       return;
     }
     await runAction(async () => {
@@ -600,17 +618,18 @@ export default function Home() {
       });
       setImportPreview(preview.preview);
       setNotice(
-        `Import applied: ${data.result.created.length} created, ${data.result.updated.length} updated, ${data.result.skipped.length} skipped.`
+        `导入已应用：新增 ${data.result.created.length}，更新 ${data.result.updated.length}，跳过 ${data.result.skipped.length}。`
       );
     });
   }
 
   async function exportPlaintext() {
     if (!selectedVaultId) return;
-    if (plaintextActionsBlocked) {
+    if (!canUseVault || plaintextActionsBlocked) {
       setExportResult(null);
+      setShowPlaintextExport(false);
       setError("");
-      setNotice(isLocked ? "Vault is locked. Re-authenticate before exporting secrets." : "Screenshot-safe mode blocks plaintext export display.");
+      setNotice("保险库已锁定。导出前请先输入保险库密码。");
       return;
     }
     await runAction(async () => {
@@ -619,17 +638,19 @@ export default function Home() {
         body: JSON.stringify({ format: "plaintext", confirmedPlaintextRisk: plaintextConfirmed })
       });
       setExportResult(data.export);
+      setShowPlaintextExport(false);
       await loadAuditEvents();
-      setNotice("Plaintext export prepared after explicit warning confirmation.");
+      setNotice("明文导出已准备好。只在屏幕安全时显示明文。");
     });
   }
 
   async function exportEncryptedBackup() {
     if (!selectedVaultId) return;
-    if (isLocked) {
+    if (!canUseVault) {
       setExportResult(null);
+      setShowPlaintextExport(false);
       setError("");
-      setNotice("Vault is locked. Re-authenticate before exporting secrets.");
+      setNotice("保险库已锁定。导出前请先输入保险库密码。");
       return;
     }
     await runAction(async () => {
@@ -638,69 +659,47 @@ export default function Home() {
         body: JSON.stringify({ format: "encrypted" })
       });
       setExportResult(data.export);
+      setShowPlaintextExport(false);
       await loadAuditEvents();
-      setNotice("Encrypted backup path documented as deferred until the backup mechanism is approved.");
+      setNotice("加密备份路径已记录为待批准能力，当前暂缓执行。");
     });
   }
 
   return (
-    <main className="workbench-shell">
-      <aside className="vault-sidebar" aria-label="Project and vault navigation">
+    <main className="workbench-shell min-h-screen bg-[radial-gradient(circle_at_top_left,#d7f8f2_0,#eef4f5_34%,#e7ecef_100%)] text-slate-950">
+      <aside className="vault-sidebar" aria-label="保险库导航 Vault navigation">
         <div className="brand">
           <span className="brand-mark">SM</span>
           <div>
             <strong>SecretManager</strong>
-            <small>Demo-safe workbench</small>
+            <small>密钥管理工作台</small>
           </div>
         </div>
 
         <section className="nav-section">
           <div className="nav-section-header">
-            <span>Projects</span>
-            <button className="icon-button" type="button" aria-label="New project" onClick={() => openDrawer("new-project")}>+</button>
+            <span><HelpTerm term="保险库 Vaults" help={copy.help.vault} /></span>
+            <button className="icon-button" type="button" aria-label="新建保险库 New vault" onClick={() => openDrawer("new-vault")} disabled={!selectedProjectId}>+</button>
           </div>
           <div className="nav-list">
-            {projects.map((project) => (
-              <button
-                className={project.id === selectedProjectId ? "nav-card selected" : "nav-card"}
-                key={project.id}
-                type="button"
-                onClick={() => setSelectedProjectId(project.id)}
-              >
-                <strong>{project.name}</strong>
-                <span>{project.description || "No description"}</span>
-              </button>
-            ))}
-            {!projects.length && (
-              <div className="empty compact">
-                <strong>No projects yet</strong>
-                <span>Create a project, then add a vault or import a masked .env preview.</span>
-              </div>
-            )}
-          </div>
-        </section>
-
-        <section className="nav-section">
-          <div className="nav-section-header">
-            <span>Vaults</span>
-            <button className="icon-button" type="button" aria-label="New vault" onClick={() => openDrawer("new-vault")} disabled={!login || !selectedProjectId}>+</button>
-          </div>
-          <div className="nav-list">
-            {vaults.map((vault) => (
-              <button
-                className={vault.id === selectedVaultId ? "nav-card selected" : "nav-card"}
-                key={vault.id}
-                type="button"
-                onClick={() => setSelectedVaultId(vault.id)}
-              >
-                <strong>{vault.name}</strong>
-                  <span>{vault.environment} / {vault.secretCount} secrets / {vault.locked ? "locked" : "unlocked"}</span>
-              </button>
-            ))}
+            {vaults.map((vault) => {
+              const vaultDisplayLocked = vault.locked;
+              return (
+                <button
+                  className={vault.id === selectedVaultId ? "nav-card selected" : "nav-card"}
+                  key={vault.id}
+                  type="button"
+                  onClick={() => setSelectedVaultId(vault.id)}
+                >
+                  <strong>{vault.name}</strong>
+                  <span>{vault.secretCount} 个密钥 / {vaultDisplayLocked ? "已锁定" : "已解锁"}</span>
+                </button>
+              );
+            })}
             {!vaults.length && (
               <div className="empty compact">
-                <strong>No vaults</strong>
-                <span>Add a vault to store fake demo secrets.</span>
+                <strong>暂无保险库</strong>
+                <span>添加保险库来保存演示用假密钥。</span>
               </div>
             )}
           </div>
@@ -710,237 +709,232 @@ export default function Home() {
       <section className="main-workspace">
         <header className="topbar">
           <div>
-            <h1>{selectedVault ? selectedVault.name : "Vault workbench"}</h1>
-            <p>{selectedProject ? selectedProject.name : "Create a project"} / {selectedVault?.environment || "no vault selected"}</p>
+            <h1>{selectedVault ? selectedVault.name : "保险库工作台"}</h1>
+            <p>{selectedVault ? "列表默认只展示密钥摘要，点击密钥名查看详情、版本审计和操作日志。" : "选择或创建保险库"}</p>
           </div>
-          <form onSubmit={loginDemo} className="login-form">
-            <span>{login ? login.actor : "Not signed in"}</span>
-            <button type="submit">{login ? "Refresh session" : "Login"}</button>
-          </form>
+          <div className="session-actions">
+            <span>{selectedVault ? `保险库 ${vaultStatusLabel}` : "未选择保险库"}</span>
+          </div>
         </header>
 
-        {(notice || error) && (
-          <div className={error ? "banner error" : "banner"} role="status">
-            {error || notice}
-          </div>
-        )}
+        <div className={error ? "banner error" : notice ? "banner" : "banner placeholder"} role="status">
+          {error || notice || "状态占位"}
+        </div>
 
         <section className="workspace-grid">
           <section className="secret-workbench" aria-label="Secret table">
             <div className="toolbar">
               <div>
-                <span className="eyebrow">Masked by default</span>
-                <h2>Secrets</h2>
+                <span className="eyebrow">默认脱敏</span>
+                <h2><HelpTerm term="密钥 Secrets" help={copy.help.secret} /></h2>
               </div>
               <div className="toolbar-actions">
-                <button type="button" onClick={() => openDrawer("add-secret")} disabled={!login || !selectedVaultId || isLocked}>Add secret</button>
-                <button className="secondary" type="button" onClick={() => openTransfer("import")} disabled={!selectedVaultId || isLocked}>Import .env</button>
-                <button className="secondary" type="button" onClick={() => openTransfer("export")} disabled={!selectedVaultId}>Export</button>
+                <button type="button" onClick={() => openDrawer("add-secret")} disabled={!canUseVault}>新增密钥</button>
+                <button className="secondary" type="button" onClick={() => openTransfer("import")} disabled={!canUseVault}>导入 .env</button>
+                <button className="secondary" type="button" onClick={() => openTransfer("export")} disabled={!canUseVault}>导出</button>
               </div>
+            </div>
+
+            <div className="vault-summary" aria-label="保险库状态">
+              <div>
+                <span className="eyebrow">保险库状态</span>
+                <strong className={vaultStatusClass}>{vaultStatusLabel}</strong>
+              </div>
+              <dl className="health-list">
+                <div><dt>密钥数</dt><dd>{secrets.length}</dd></div>
+                <div><dt>审计行</dt><dd>{auditEvents.length}</dd></div>
+                <div><dt><HelpTerm term="操作状态" help={copy.help.operationState} /></dt><dd>{isLocked ? "敏感操作已暂停" : "敏感操作可用"}</dd></div>
+              </dl>
+              <div className="vault-controls">
+                {selectedVault && !isLocked && (
+                  <button className="secondary" type="button" onClick={() => void lockVault()}>锁定保险库</button>
+                )}
+              </div>
+              <p className="state-copy">{isLocked ? "需要先输入保险库密码，才能显示、复制、轮换、导入或导出；密码只保存在当前浏览器会话。" : "保险库已解锁：敏感操作可用，明文仍只在主动显示或导出确认后出现。"}</p>
             </div>
 
             {isLocked ? (
               <div className="state-panel locked-state" data-testid="locked-state">
-                <strong>Vault is locked</strong>
-                <span>Unlock this vault with its 6-20 character password. The password is not stored; only the derived key is cached briefly in memory.</span>
-                {isVaultLocked && (
+                <strong>保险库已锁定</strong>
+                <span>输入 6-20 位密码解锁。密码仅保存在当前浏览器会话，刷新不会丢失解锁状态。</span>
+                {isVaultLocked ? (
                   <form className="unlock-form" onSubmit={unlockVault}>
                     <input
-                      aria-label="Vault password"
+                      aria-label="保险库密码 Vault password"
                       type="password"
                       minLength={6}
                       maxLength={20}
                       value={unlockPassword}
                       onChange={(event) => setUnlockPassword(event.target.value)}
                     />
-                    <button type="submit">Unlock vault</button>
+                    <button type="submit">解锁保险库</button>
                   </form>
-                )}
+                ) : null}
               </div>
             ) : !selectedVault ? (
               <div className="state-panel empty-state">
-                <strong>Select or create a vault</strong>
-                <span>Choose a vault from the left rail or create one for this project.</span>
-                <button type="button" onClick={() => openDrawer("new-vault")} disabled={!login || !selectedProjectId}>Create vault</button>
+                <strong>选择或创建保险库</strong>
+                <span>从左侧选择保险库，或为当前项目创建一个。</span>
+                <button type="button" onClick={() => openDrawer("new-vault")} disabled={!selectedProjectId}>创建保险库</button>
               </div>
             ) : secrets.length === 0 ? (
               <div className="state-panel empty-state">
-                <strong>This vault is empty</strong>
-                <span>Add the first masked secret or preview an .env import before applying changes.</span>
+                <strong>当前保险库为空</strong>
+                <span>新增第一个脱敏密钥，或先预览 .env 导入再应用。</span>
                 <div className="inline-actions">
-                  <button type="button" onClick={() => openDrawer("add-secret")}>Add secret</button>
-                  <button className="secondary" type="button" onClick={() => openTransfer("import")}>Import .env</button>
+                  <button type="button" onClick={() => openDrawer("add-secret")} disabled={!canUseVault}>新增密钥</button>
+                  <button className="secondary" type="button" onClick={() => openTransfer("import")} disabled={!canUseVault}>导入 .env</button>
                 </div>
               </div>
             ) : (
-              <div className="secret-table" role="table" aria-label="Secrets">
-                <div className="secret-row table-head" role="row">
-                  <span>Key</span>
-                  <span>Env</span>
-                  <span>Metadata</span>
-                  <span>Masked value</span>
-                  <span>Updated</span>
-                  <span>Actions</span>
-                </div>
-                {secrets.map((secret) => (
-                  <div
-                    className={secret.id === selectedSecretId ? "secret-row selected" : "secret-row"}
-                    key={secret.id}
-                    role="row"
-                    onClick={() => {
-                      setSelectedSecretId(secret.id);
-                      setRevealedValue("");
-                    }}
-                  >
-                    <span>
-                      <button className="link-button key-button" type="button">{secret.key}</button>
-                    </span>
-                    <span>{selectedVault.environment}</span>
-                    <span>{secret.description || "No description"}</span>
-                    <span className="masked" data-testid={`masked-${secret.key}`}>{secret.maskedValue}</span>
-                    <span>{formatDateTime(secret.updatedAt)}</span>
-                    <span className="row-actions">
-                      <button className="mini-button" type="button" onClick={(event) => { event.stopPropagation(); void copySecret(secret.id); }} disabled={plaintextActionsBlocked}>Copy</button>
-                      <button className="mini-button" type="button" onClick={(event) => { event.stopPropagation(); void revealSecret(secret.id); }} disabled={plaintextActionsBlocked}>Reveal</button>
-                      <button className="mini-button" type="button" onClick={(event) => { event.stopPropagation(); setSelectedSecretId(secret.id); openDrawer("rotate-secret"); }} disabled={isLocked}>Rotate</button>
-                    </span>
+              <>
+                <div className="secret-table" role="table" aria-label="密钥 Secrets">
+                  <div className="secret-row table-head" role="row">
+                    <span>密钥名</span>
+                    <span><HelpTerm term="脱敏值 Masked value" help={copy.help.maskedValue} /></span>
+                    <span>更新时间</span>
+                    <span>操作</span>
                   </div>
-                ))}
-              </div>
+                  {secrets.map((secret) => (
+                      <div
+                        className={secret.id === selectedSecretId ? "secret-row selected" : "secret-row"}
+                        key={secret.id}
+                        role="row"
+                        onClick={() => {
+                          setSelectedSecretId(secret.id);
+                          setRevealedValue("");
+                          setDrawerMode("secret-detail");
+                        }}
+                      >
+                        <span>
+                          <button className="link-button key-button" type="button">{secret.key}</button>
+                        </span>
+                        <span
+                          className={secret.id === selectedSecretId && revealedValue ? "revealed-value" : "masked"}
+                          data-testid={`masked-${secret.key}`}
+                        >
+                          {secret.id === selectedSecretId && revealedValue ? revealedValue : secret.maskedValue}
+                        </span>
+                        <span>{formatDateTime(secret.updatedAt)}</span>
+                        <span className="row-actions">
+                          <button className="mini-button" type="button" onClick={(event) => { event.stopPropagation(); void copySecret(secret.id); }} disabled={plaintextActionsBlocked}>复制</button>
+                          <button className="mini-button" type="button" onClick={(event) => { event.stopPropagation(); void revealSecret(secret.id); }} disabled={plaintextActionsBlocked}>显示明文</button>
+                          <button className="mini-button" type="button" onClick={(event) => { event.stopPropagation(); setSelectedSecretId(secret.id); openDrawer("rotate-secret"); }} disabled={!canUseVault}>轮换</button>
+                          <button className="mini-button danger-outline" type="button" onClick={(event) => { event.stopPropagation(); setSelectedSecretId(secret.id); openDrawer("delete-secret"); }} disabled={!canUseVault}>删除</button>
+                        </span>
+                      </div>
+                  ))}
+                </div>
+
+              </>
             )}
           </section>
+        </section>
+      </section>
 
-          <aside className="right-rail" aria-label="Vault context">
-            <section className="rail-panel">
-              <div className="rail-header">
-                <h2>Vault health</h2>
-                <span className={isVaultLocked ? "status-pill danger" : "status-pill safe"}>{isVaultLocked ? "Locked" : "Unlocked"}</span>
+      {drawerMode && (
+        <div className="overlay" role="presentation">
+          <section className="drawer" role="dialog" aria-modal="true" aria-label="聚焦编辑抽屉 Focused edit drawer">
+            <div className="drawer-header">
+              <div>
+                <span className="eyebrow">聚焦变更</span>
+                <h2>
+                  {drawerMode === "new-vault" && "创建保险库"}
+                  {drawerMode === "add-secret" && "新增密钥"}
+                  {drawerMode === "rotate-secret" && "轮换密钥"}
+                  {drawerMode === "delete-secret" && "删除密钥"}
+                  {drawerMode === "secret-detail" && "密钥详情"}
+                </h2>
               </div>
-              <dl className="health-list">
-                <div><dt>Secrets</dt><dd>{secrets.length}</dd></div>
-                <div><dt>Audit rows</dt><dd>{auditEvents.length}</dd></div>
-                <div><dt>State</dt><dd>{isVaultLocked ? "locked" : trustState}</dd></div>
-              </dl>
-              {selectedVault && !isVaultLocked && (
-                <button className="secondary" type="button" onClick={() => void lockVault()}>Lock vault</button>
-              )}
-              <select aria-label="Trust state" value={trustState} onChange={(event) => changeTrustState(event.target.value as TrustState)}>
-                <option value="demo-safe">Demo-safe / fake secrets only</option>
-                <option value="locked">Locked vault</option>
-                <option value="wrong-passphrase">Wrong passphrase or expired session</option>
-                <option value="storage-unavailable">Storage unavailable</option>
-                <option value="export-failure">Export failure</option>
-                <option value="screenshot-safe">Screenshot-safe</option>
-              </select>
-              <p className="state-copy">{isVaultLocked ? "Vault password is required before reveal, copy, rotate, import, or export. The password itself is never stored." : trustStateCopy(trustState)}</p>
-            </section>
+              <button className="icon-button dark" type="button" aria-label="关闭抽屉 Close drawer" onClick={closeDrawer}>x</button>
+            </div>
 
-            <section className="rail-panel">
-              <div className="rail-header">
-                <h2>Selected secret</h2>
-                {selectedSecret && <span className="status-pill">v{selectedSecret.version}</span>}
+            {drawerMode === "new-vault" && (
+              <form className="stack-form" onSubmit={createVault}>
+                <label>保险库名称<input aria-label="新保险库名称 New vault name" value={vaultForm.name} onChange={(event) => setVaultForm({ ...vaultForm, name: event.target.value })} /></label>
+                <label>保险库密码<input aria-label="新保险库密码 New vault password" type="password" minLength={6} maxLength={20} value={vaultForm.password} onChange={(event) => setVaultForm({ ...vaultForm, password: event.target.value })} /></label>
+                <button type="submit" disabled={!selectedProjectId}>创建保险库</button>
+              </form>
+            )}
+
+            {(drawerMode === "add-secret" || drawerMode === "rotate-secret") && (
+              <form className="stack-form" onSubmit={drawerMode === "add-secret" ? createSecret : updateSecret}>
+                <label>密钥名<input aria-label="新密钥名 New secret key" value={secretForm.key} disabled={drawerMode === "rotate-secret"} onChange={(event) => setSecretForm({ ...secretForm, key: event.target.value })} /></label>
+                <label>值<input aria-label={drawerMode === "rotate-secret" ? "轮换后的密钥值 Rotated secret value" : "新密钥值 New secret value"} value={secretForm.value} onChange={(event) => setSecretForm({ ...secretForm, value: event.target.value })} /></label>
+                <label>描述<input aria-label="新密钥描述 New secret description" value={secretForm.description} onChange={(event) => setSecretForm({ ...secretForm, description: event.target.value })} /></label>
+                <label>标签<input aria-label="密钥标签 Secret tags" value={secretForm.tags} onChange={(event) => setSecretForm({ ...secretForm, tags: event.target.value })} /></label>
+                {drawerMode === "add-secret" && hasDuplicateDraft && <p className="conflict">当前保险库已有同名密钥。请轮换现有行或选择其他名称。</p>}
+                <button type="submit" disabled={drawerMode === "add-secret" && hasDuplicateDraft}>{drawerMode === "add-secret" ? "新增密钥" : "轮换密钥"}</button>
+              </form>
+            )}
+
+            {drawerMode === "rotate-secret" && selectedSecret && (
+              <p className="empty">轮换只更新当前密钥值；删除需要走单独确认流程。</p>
+            )}
+
+            {drawerMode === "delete-secret" && selectedSecret && (
+              <div className="delete-confirm">
+                <label htmlFor="delete-key-confirm">输入 {selectedSecret.key} 确认删除</label>
+                <div className="delete-row">
+                  <input id="delete-key-confirm" aria-label="删除确认密钥名 Delete confirmation key" value={deleteKeyConfirm} onChange={(event) => setDeleteKeyConfirm(event.target.value)} />
+                  <button className="danger" type="button" onClick={deleteSecret} disabled={deleteKeyConfirm !== selectedSecret.key}>删除</button>
+                </div>
               </div>
-              {selectedSecret && !isLocked ? (
-                <>
+            )}
+
+            {drawerMode === "secret-detail" && selectedSecret && (
+              <div className="detail-drawer" aria-label="密钥详情、版本审计与操作日志">
+                <section>
+                  <div className="rail-header">
+                    <div>
+                      <span className="eyebrow">密钥详情</span>
+                      <h3>{selectedSecret.key}</h3>
+                    </div>
+                    <span className="status-pill">v{selectedSecret.version}</span>
+                  </div>
                   <dl className="detail-list">
-                    <div><dt>Key</dt><dd>{selectedSecret.key}</dd></div>
-                    <div><dt>Masked value</dt><dd className="masked">{selectedSecret.maskedValue}</dd></div>
-                    <div><dt>Revealed value</dt><dd data-testid="revealed-value">{revealedValue || "Hidden until reveal"}</dd></div>
-                    <div><dt>Description</dt><dd>{selectedSecret.description || "No description"}</dd></div>
+                    <div><dt>更新时间</dt><dd>{formatDateTime(selectedSecret.updatedAt)}</dd></div>
+                    <div><dt>说明</dt><dd>{selectedSecret.description || "暂无说明"}</dd></div>
                   </dl>
-                  <div className="inline-actions">
-                    <button type="button" onClick={() => void revealSecret()} disabled={plaintextActionsBlocked}>Reveal</button>
-                    <button className="secondary" type="button" onClick={() => void copySecret()} disabled={plaintextActionsBlocked}>Copy</button>
-                    <button className="secondary" type="button" onClick={() => openDrawer("rotate-secret")}>Rotate</button>
+                </section>
+                <section>
+                  <div className="rail-header">
+                    <div>
+                      <span className="eyebrow">版本审计</span>
+                      <h3>最近版本</h3>
+                    </div>
                   </div>
                   <div className="version-list">
-                    {versions.slice(0, 3).map((version) => (
+                    {versions.slice(0, 5).map((version) => (
                       <div key={version.version} className="version-row">
                         <strong>v{version.version}</strong>
                         <span className="masked">{version.maskedValue}</span>
                         <span>{version.changedBy}</span>
                       </div>
                     ))}
+                    {!versions.length && <p className="empty">暂无版本记录。</p>}
                   </div>
-                </>
-              ) : (
-                <p className="empty">{isLocked ? "Details hidden while locked." : "Select a secret from the table."}</p>
-              )}
-            </section>
-
-            <section className="rail-panel" id="audit">
-              <div className="rail-header">
-                <h2>Recent audit</h2>
-                <button className="mini-button" type="button" onClick={loadAuditEvents}>Refresh</button>
-              </div>
-              <div className="audit-feed">
-                {recentAudit.map((event) => (
-                  <div key={event.id} className="audit-row">
-                    <strong>{event.action}</strong>
-                    <span>{event.secretKey || "workspace"}</span>
-                    <span>{event.actor}</span>
-                    <time>{formatTime(event.createdAt)}</time>
+                </section>
+                <section>
+                  <div className="rail-header">
+                    <div>
+                      <span className="eyebrow">操作日志</span>
+                      <h3>最近审计</h3>
+                    </div>
+                    <button className="mini-button" type="button" onClick={loadAuditEvents}>刷新</button>
                   </div>
-                ))}
-                {!recentAudit.length && <p className="empty">Reveal, copy, import, and export evidence will appear here.</p>}
-              </div>
-            </section>
-          </aside>
-        </section>
-      </section>
-
-      {drawerMode && (
-        <div className="overlay" role="presentation">
-          <section className="drawer" role="dialog" aria-modal="true" aria-label="Focused edit drawer">
-            <div className="drawer-header">
-              <div>
-                <span className="eyebrow">Focused change</span>
-                <h2>
-                  {drawerMode === "new-project" && "Create project"}
-                  {drawerMode === "new-vault" && "Create vault"}
-                  {drawerMode === "add-secret" && "Add secret"}
-                  {drawerMode === "rotate-secret" && "Rotate secret"}
-                </h2>
-              </div>
-              <button className="icon-button dark" type="button" aria-label="Close drawer" onClick={closeDrawer}>x</button>
-            </div>
-
-            {drawerMode === "new-project" && (
-              <form className="stack-form" onSubmit={createProject}>
-                <label>Project name<input aria-label="New project name" value={projectForm.name} onChange={(event) => setProjectForm({ ...projectForm, name: event.target.value })} /></label>
-                <label>Description<input aria-label="New project description" value={projectForm.description} onChange={(event) => setProjectForm({ ...projectForm, description: event.target.value })} /></label>
-                <button type="submit">Create Project</button>
-              </form>
-            )}
-
-            {drawerMode === "new-vault" && (
-              <form className="stack-form" onSubmit={createVault}>
-                <label>Vault name<input aria-label="New vault name" value={vaultForm.name} onChange={(event) => setVaultForm({ ...vaultForm, name: event.target.value })} /></label>
-                <label>Environment<input aria-label="New vault environment" value={vaultForm.environment} onChange={(event) => setVaultForm({ ...vaultForm, environment: event.target.value })} /></label>
-                <label>Vault password<input aria-label="New vault password" type="password" minLength={6} maxLength={20} value={vaultForm.password} onChange={(event) => setVaultForm({ ...vaultForm, password: event.target.value })} /></label>
-                <button type="submit" disabled={!login || !selectedProjectId}>Create Vault</button>
-              </form>
-            )}
-
-            {(drawerMode === "add-secret" || drawerMode === "rotate-secret") && (
-              <form className="stack-form" onSubmit={drawerMode === "add-secret" ? createSecret : updateSecret}>
-                <label>Key<input aria-label="New secret key" value={secretForm.key} disabled={drawerMode === "rotate-secret"} onChange={(event) => setSecretForm({ ...secretForm, key: event.target.value })} /></label>
-                <label>Environment<input aria-label="Secret environment" value={selectedVault?.environment || ""} disabled /></label>
-                <label>Value<input aria-label={drawerMode === "rotate-secret" ? "Rotated secret value" : "New secret value"} value={secretForm.value} onChange={(event) => setSecretForm({ ...secretForm, value: event.target.value })} /></label>
-                <label>Description<input aria-label="New secret description" value={secretForm.description} onChange={(event) => setSecretForm({ ...secretForm, description: event.target.value })} /></label>
-                <label>Tags<input aria-label="Secret tags" value={secretForm.tags} onChange={(event) => setSecretForm({ ...secretForm, tags: event.target.value })} /></label>
-                {drawerMode === "add-secret" && hasDuplicateDraft && <p className="conflict">Duplicate secret key in this environment. Rotate the existing row or choose another key.</p>}
-                <button type="submit" disabled={drawerMode === "add-secret" && hasDuplicateDraft}>{drawerMode === "add-secret" ? "Add secret" : "Rotate secret"}</button>
-              </form>
-            )}
-
-            {drawerMode === "rotate-secret" && selectedSecret && (
-              <div className="delete-confirm">
-                <label htmlFor="delete-key-confirm">Type {selectedSecret.key} to delete</label>
-                <div className="delete-row">
-                  <input id="delete-key-confirm" aria-label="Delete confirmation key" value={deleteKeyConfirm} onChange={(event) => setDeleteKeyConfirm(event.target.value)} />
-                  <button className="danger" type="button" onClick={deleteSecret} disabled={deleteKeyConfirm !== selectedSecret.key}>Delete</button>
-                </div>
+                  <div className="audit-feed">
+                    {recentAudit.map((event) => (
+                      <div key={event.id} className="audit-row">
+                        <strong>{event.action}</strong>
+                        <span>{event.secretKey || "保险库"}</span>
+                        <span>{event.actor}</span>
+                        <time>{formatTime(event.createdAt)}</time>
+                      </div>
+                    ))}
+                    {!recentAudit.length && <p className="empty">显示、复制、导入和导出的证据会出现在这里。</p>}
+                  </div>
+                </section>
               </div>
             )}
           </section>
@@ -949,37 +943,37 @@ export default function Home() {
 
       {transferMode && (
         <div className="overlay" role="presentation">
-          <section className="modal" role="dialog" aria-modal="true" aria-label={transferMode === "import" ? "Import .env wizard" : "Export safety flow"}>
+          <section className="modal" role="dialog" aria-modal="true" aria-label={transferMode === "import" ? "导入 .env 向导 Import .env wizard" : "导出安全流程 Export safety flow"}>
             <div className="drawer-header">
               <div>
-                <span className="eyebrow">Safety flow</span>
-                <h2>{transferMode === "import" ? "Import .env" : "Export settings"}</h2>
+                <span className="eyebrow">安全流程</span>
+                <h2>{transferMode === "import" ? "导入 .env" : "导出设置"}</h2>
               </div>
-              <button className="icon-button dark" type="button" aria-label="Close transfer flow" onClick={() => setTransferMode(null)}>x</button>
+              <button className="icon-button dark" type="button" aria-label="关闭导入导出流程 Close transfer flow" onClick={() => setTransferMode(null)}>x</button>
             </div>
 
             {transferMode === "import" ? (
               <div className="wizard-grid">
                 <section className="wizard-step">
                   <span className="step-number">1</span>
-                  <h3>Paste or load .env</h3>
-                  <textarea id="env-import" aria-label=".env import content" value={importContent} onChange={(event) => setImportContent(event.target.value)} />
-                  <input aria-label=".env import file" type="file" accept=".env,text/plain" onChange={loadImportFile} />
-                  <button type="button" onClick={previewImport} disabled={!selectedVaultId || isLocked}>Preview Import</button>
+                  <h3>粘贴或加载 .env</h3>
+                  <textarea id="env-import" aria-label=".env 导入内容 .env import content" value={importContent} onChange={(event) => setImportContent(event.target.value)} />
+                  <input aria-label=".env 导入文件 .env import file" type="file" accept=".env,text/plain" onChange={loadImportFile} />
+                  <button type="button" onClick={previewImport} disabled={!canUseVault}>预览导入</button>
                 </section>
                 <section className="wizard-step">
                   <span className="step-number">2</span>
-                  <h3>Preview masked rows</h3>
+                  <h3>预览脱敏行</h3>
                   {importPreview ? (
                     <div className="import-preview" data-testid="import-preview">
                       <div className="preview-summary">
-                        <span>{importPreview.validCount} valid</span>
-                        <span>{importPreview.duplicateCount} duplicate</span>
-                        <span>{importPreview.invalidCount} invalid</span>
+                        <span>{importPreview.validCount} 有效</span>
+                        <span>{importPreview.duplicateCount} 重复</span>
+                        <span>{importPreview.invalidCount} 无效</span>
                       </div>
                       {importPreview.lines.map((line) => (
                         <div className={`preview-row ${line.status}`} key={`${line.lineNumber}-${line.raw}`}>
-                          <strong>Line {line.lineNumber}</strong>
+                          <strong>第 {line.lineNumber} 行</strong>
                           <span>{line.key || line.raw}</span>
                           <span>{line.valuePreview || line.message}</span>
                           <span>{line.status}</span>
@@ -987,43 +981,54 @@ export default function Home() {
                       ))}
                     </div>
                   ) : (
-                    <p className="empty">Run preview before applying. Values remain masked in every row.</p>
+                    <p className="empty">应用前先运行预览；每一行都会保持脱敏。</p>
                   )}
                 </section>
                 <section className="wizard-step">
                   <span className="step-number">3</span>
-                  <h3>Resolve conflicts</h3>
-                  <select aria-label="Duplicate conflict strategy" value={conflictStrategy} onChange={(event) => setConflictStrategy(event.target.value as "skip" | "overwrite")}>
-                    <option value="skip">Skip duplicates</option>
-                    <option value="overwrite">Overwrite duplicates</option>
+                  <h3>处理冲突</h3>
+                  <select aria-label="重复项冲突策略 Duplicate conflict strategy" value={conflictStrategy} onChange={(event) => setConflictStrategy(event.target.value as "skip" | "overwrite")}>
+                    <option value="skip">跳过重复项</option>
+                    <option value="overwrite">覆盖重复项</option>
                   </select>
-                  <button type="button" onClick={applyImport} disabled={!selectedVaultId || !importPreview || isLocked}>Apply Import</button>
+                  <button type="button" onClick={applyImport} disabled={!canUseVault || !importPreview}>应用导入</button>
                 </section>
               </div>
             ) : (
               <div className="export-flow">
                 <section className="safe-export">
-                  <span className="status-pill safe">Default</span>
-                  <h3>Encrypted backup</h3>
-                  <p>Use this option for demo evidence and backups. It avoids plaintext display in the browser.</p>
-                  <button type="button" onClick={exportEncryptedBackup} disabled={!selectedVaultId || isLocked}>Encrypted Backup</button>
+                  <span className="status-pill safe">默认</span>
+                  <h3>加密备份</h3>
+                  <p>用于演示证据和备份，避免在浏览器中显示明文。</p>
+                  <button type="button" onClick={exportEncryptedBackup} disabled={!canUseVault}>加密备份</button>
                 </section>
                 <section className="warning-export" data-testid="export-warning">
-                  <span className="status-pill danger">Warning</span>
-                  <h3>Plaintext .env export</h3>
-                  <p>Do not paste exported files into issues, chat, docs, screenshots, or demo recordings. Plaintext output appears only after explicit confirmation.</p>
+                  <span className="status-pill danger">风险</span>
+                  <h3>明文 .env 导出</h3>
+                  <p>不要把导出文件粘贴到任务、聊天、文档、截图或演示录屏中。明文会先准备但不直接显示，需要再次确认显示。</p>
                   <label className="checkbox-row">
                     <input type="checkbox" checked={plaintextConfirmed} onChange={(event) => setPlaintextConfirmed(event.target.checked)} />
-                    <span>Plaintext export exposes secret values</span>
+                    <span>明文导出会暴露密钥值</span>
                   </label>
-                  <button type="button" onClick={exportPlaintext} disabled={!selectedVaultId || plaintextActionsBlocked}>Export .env</button>
+                  <button type="button" onClick={exportPlaintext} disabled={!selectedVaultId || plaintextActionsBlocked}>导出 .env</button>
                 </section>
                 {exportResult && (
                   <div className="export-result" data-testid="export-result">
                     <strong>{exportResult.filename || exportResult.status}</strong>
                     <span>{exportResult.warning || exportResult.reason}</span>
-                    {exportResult.content && !isScreenshotSafe && <pre>{exportResult.content}</pre>}
-                    {exportResult.content && isScreenshotSafe && <span>Plaintext hidden in screenshot-safe mode.</span>}
+                    {exportResult.content && (
+                      <div className="plaintext-gate">
+                        <span>明文文件已准备好，默认隐藏行内内容。</span>
+                        <button
+                          className="secondary"
+                          type="button"
+                          onClick={() => setShowPlaintextExport((current) => !current)}
+                        >
+                          {showPlaintextExport ? "隐藏明文" : "显示明文"}
+                        </button>
+                        {showPlaintextExport && <pre>{exportResult.content}</pre>}
+                      </div>
+                    )}
                     {exportResult.nextStep && <span>{exportResult.nextStep}</span>}
                   </div>
                 )}

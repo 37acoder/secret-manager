@@ -9,7 +9,7 @@ export async function GET(request: Request, context: { params: Promise<{ vaultId
   const requestId = createRequestId();
   try {
     const params = await context.params;
-    const data = secretService.listSecretsWithToken(params.vaultId, bearerToken(request));
+    const data = await secretService.listSecretsWithToken(params.vaultId, bearerToken(request));
     return json(toDeveloperApiSuccess(requestId, { secrets: data }));
   } catch (error) {
     return json(toDeveloperApiError(requestId, error));

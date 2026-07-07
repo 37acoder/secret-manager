@@ -5,7 +5,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ vau
   try {
     const { vaultId } = await params;
     const body = await readJson(request);
-    return jsonOk({ preview: secretService.previewImport(vaultId, body) });
+    return jsonOk({ preview: await secretService.previewImport(vaultId, body) });
   } catch (error) {
     return jsonError(error);
   }

@@ -4,7 +4,7 @@ import { secretService } from "@/lib/secret-service";
 export async function GET(_request: Request, { params }: { params: Promise<{ vaultId: string }> }) {
   try {
     const { vaultId } = await params;
-    return jsonOk({ vault: secretService.getVault(vaultId) });
+    return jsonOk({ vault: await secretService.getVault(vaultId) });
   } catch (error) {
     return jsonError(error);
   }
@@ -14,7 +14,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ va
   try {
     const { vaultId } = await params;
     const body = await readJson(request);
-    return jsonOk({ vault: secretService.updateVault(vaultId, body, actorFrom(request)) });
+    return jsonOk({ vault: await secretService.updateVault(vaultId, body, actorFrom(request)) });
   } catch (error) {
     return jsonError(error);
   }
@@ -23,7 +23,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ va
 export async function DELETE(request: Request, { params }: { params: Promise<{ vaultId: string }> }) {
   try {
     const { vaultId } = await params;
-    return jsonOk(secretService.deleteVault(vaultId, actorFrom(request)));
+    return jsonOk(await secretService.deleteVault(vaultId, actorFrom(request)));
   } catch (error) {
     return jsonError(error);
   }

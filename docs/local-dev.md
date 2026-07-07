@@ -33,25 +33,41 @@ Use `sm unlock` to exchange the vault password for a temporary read token. Plain
 
 ## Database
 
-The default local setup uses SQLite through `DATABASE_URL=file:./dev.db`.
-
-The web MVP also stores its encrypted local runtime snapshot in SQLite3:
+The default local setup uses the local encrypted snapshot store:
 
 ```bash
+SECRET_MANAGER_STORAGE=snapshot
 SECRET_MANAGER_SQLITE_PATH=.secret-manager/state.sqlite
 ```
 
 This file stores encrypted vault/secret state and safe metadata. It does not store vault passwords, derived in-memory unlock keys, or temporary CLI tokens.
 
+To run the web route handlers through the Prisma SQL connector instead, use:
+
+```bash
+SECRET_MANAGER_STORAGE=prisma
+DATABASE_URL=file:./dev.db
+pnpm db:generate
+pnpm db:migrate
+pnpm dev
+```
+
+Local SQLite connector data is stored by Prisma at the `DATABASE_URL` file path. The connector persists the same encrypted payload shape as the snapshot store: ciphertext, nonce, and auth tag are durable; raw secret values, vault passwords, derived unlock keys, and temporary CLI tokens are not durable.
+
 For a Postgres-style deployment rehearsal:
 
 ```bash
 docker compose up db
+DATABASE_URL=postgresql://secret_manager:secret_manager_demo_password@localhost:5432/secret_manager
+SECRET_MANAGER_STORAGE=prisma
+pnpm --filter @secret-manager/db db:generate:postgres
+pnpm --filter @secret-manager/db db:push:postgres
+pnpm dev
 ```
 
-Then point `DATABASE_URL` at the local Postgres service before running migrations.
+Switch back to the local SQLite connector with `pnpm db:generate` before running `DATABASE_URL=file:./dev.db`.
 
-The current web runtime uses the local SQLite snapshot store. The Prisma SQL connector is available as the next persistence hardening layer for normalized relational storage.
+Keep the docker compose password as local demo-only configuration. Route real shared credentials through Infra & DevOps instead of committing them or pasting them into issues.
 
 ## Verification
 

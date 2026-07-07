@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync, 
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type { PrismaClient } from "@secret-manager/db";
 
 export type Project = {
   id: string;
@@ -160,6 +161,19 @@ const UNLOCK_TTL_MS = 10 * 60 * 1000;
 const CLI_TOKEN_TTL_MS = 15 * 60 * 1000;
 const VERIFIER_TEXT = "secret-manager-vault-verifier";
 const STATE_KEY = "secret-manager-state";
+const STORAGE_MODE = process.env.SECRET_MANAGER_STORAGE === "prisma" ? "prisma" : "snapshot";
+type PrismaRuntimeStateClient = PrismaClient & {
+  runtimeState: {
+    findUnique(input: { where: { key: string } }): Promise<{ value: string } | null>;
+    upsert(input: {
+      where: { key: string };
+      update: { value: string };
+      create: { key: string; value: string };
+    }): Promise<unknown>;
+    deleteMany(input?: { where?: { key?: string } }): Promise<unknown>;
+  };
+};
+let prismaState: PrismaRuntimeStateClient | undefined;
 
 function now() {
   return new Date().toISOString();
@@ -316,11 +330,13 @@ function createInitialState(): State {
 }
 
 function state() {
-  globalState.__secretManagerState ??= loadPersistedState() ?? persistState(createInitialState());
+  globalState.__secretManagerState ??=
+    STORAGE_MODE === "prisma" ? createInitialState() : loadPersistedState() ?? persistState(createInitialState());
   return globalState.__secretManagerState;
 }
 
 function persistCurrentState() {
+  if (STORAGE_MODE === "prisma") return;
   persistState(state());
 }
 
@@ -362,6 +378,56 @@ function toPersistedState(current: State): Omit<State, "temporaryTokens"> {
       locked: true
     }))
   };
+}
+
+async function loadPrismaState(): Promise<void> {
+  if (globalState.__secretManagerState) return;
+  const runtimeState = await getPrismaRuntimeState();
+  const row = await runtimeState.runtimeState.findUnique({ where: { key: STATE_KEY } });
+  if (!row?.value) {
+    globalState.__secretManagerState ??= createInitialState();
+    await persistPrismaState();
+    return;
+  }
+  try {
+    const parsed = JSON.parse(row.value) as Omit<State, "temporaryTokens">;
+    globalState.__secretManagerState = {
+      ...parsed,
+      vaults: parsed.vaults.map((vault) => ({
+        ...vault,
+        locked: true,
+        unlockedKey: undefined,
+        unlockedUntilMs: undefined
+      })),
+      temporaryTokens: []
+    };
+  } catch {
+    globalState.__secretManagerState = createInitialState();
+    await persistPrismaState();
+  }
+}
+
+async function persistPrismaState(): Promise<void> {
+  const runtimeState = await getPrismaRuntimeState();
+  await runtimeState.runtimeState.upsert({
+    where: { key: STATE_KEY },
+    update: { value: JSON.stringify(toPersistedState(state())) },
+    create: { key: STATE_KEY, value: JSON.stringify(toPersistedState(state())) }
+  });
+}
+
+async function resetPrismaStateForTests(): Promise<void> {
+  const runtimeState = await getPrismaRuntimeState();
+  await runtimeState.runtimeState.deleteMany({ where: { key: STATE_KEY } });
+  globalState.__secretManagerState = undefined;
+}
+
+async function getPrismaRuntimeState(): Promise<PrismaRuntimeStateClient> {
+  if (!prismaState) {
+    const { db } = await import("@secret-manager/db");
+    prismaState = db as PrismaRuntimeStateClient;
+  }
+  return prismaState;
 }
 
 function sqlite(): DatabaseSync {
@@ -485,7 +551,7 @@ function envValueFromLine(raw: string) {
   return normalizeEnvValue(raw.slice(separator + 1));
 }
 
-export const secretService = {
+const snapshotSecretService = {
   login(actor: string) {
     const project = state().projects[0];
     addAudit({ action: "login", projectId: project.id, actor });
@@ -860,6 +926,38 @@ export const secretService = {
     return state().auditEvents;
   }
 };
+
+type SecretServiceApi = typeof snapshotSecretService;
+type AwaitableSecretServiceApi = {
+  [Method in keyof SecretServiceApi]: (
+    ...args: Parameters<SecretServiceApi[Method]>
+  ) => Promise<ReturnType<SecretServiceApi[Method]>>;
+};
+
+function createPrismaSecretService(): AwaitableSecretServiceApi {
+  const wrapped: Partial<Record<keyof SecretServiceApi, (...args: unknown[]) => Promise<unknown>>> = {};
+  for (const methodName of Object.keys(snapshotSecretService) as Array<keyof SecretServiceApi>) {
+    const method = snapshotSecretService[methodName] as (...args: unknown[]) => unknown;
+    wrapped[methodName] = async (...args: unknown[]) => {
+      await loadPrismaState();
+      const result = method.apply(snapshotSecretService, args as never);
+      await persistPrismaState();
+      return result;
+    };
+  }
+  return wrapped as AwaitableSecretServiceApi;
+}
+
+export const secretService =
+  STORAGE_MODE === "prisma" ? createPrismaSecretService() : snapshotSecretService;
+
+export async function resetSecretServiceForTests() {
+  globalState.__secretManagerState = createInitialState();
+  persistCurrentState();
+  if (STORAGE_MODE === "prisma") {
+    await resetPrismaStateForTests();
+  }
+}
 
 function authenticateTemporaryToken(vaultId: string, token: string): TemporaryTokenRecord {
   const tokenHash = hashToken(token);

@@ -4,7 +4,7 @@ import { secretService } from "@/lib/secret-service";
 export async function GET(_request: Request, { params }: { params: Promise<{ secretId: string }> }) {
   try {
     const { secretId } = await params;
-    return jsonOk({ secret: secretService.getSecret(secretId) });
+    return jsonOk({ secret: await secretService.getSecret(secretId) });
   } catch (error) {
     return jsonError(error);
   }
@@ -14,7 +14,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ se
   try {
     const { secretId } = await params;
     const body = await readJson(request);
-    return jsonOk({ secret: secretService.updateSecret(secretId, body, actorFrom(request)) });
+    return jsonOk({ secret: await secretService.updateSecret(secretId, body, actorFrom(request)) });
   } catch (error) {
     return jsonError(error);
   }
@@ -23,7 +23,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ se
 export async function DELETE(request: Request, { params }: { params: Promise<{ secretId: string }> }) {
   try {
     const { secretId } = await params;
-    return jsonOk(secretService.deleteSecret(secretId, actorFrom(request)));
+    return jsonOk(await secretService.deleteSecret(secretId, actorFrom(request)));
   } catch (error) {
     return jsonError(error);
   }

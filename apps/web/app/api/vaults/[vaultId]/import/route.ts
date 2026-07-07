@@ -5,7 +5,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ vau
   try {
     const { vaultId } = await params;
     const body = await readJson(request);
-    return jsonOk({ result: secretService.importEnv(vaultId, body, actorFrom(request)) }, 201);
+    return jsonOk({ result: await secretService.importEnv(vaultId, body, actorFrom(request)) }, 201);
   } catch (error) {
     return jsonError(error);
   }

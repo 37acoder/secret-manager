@@ -17,7 +17,9 @@
     "test": "vitest run --passWithNoTests",
     "lint": "tsc --noEmit",
     "db:generate": "prisma generate --schema prisma/schema.prisma",
+    "db:generate:postgres": "prisma generate --schema prisma/schema.postgres.prisma",
     "db:migrate": "prisma migrate dev --schema prisma/schema.prisma",
+    "db:push:postgres": "prisma db push --schema prisma/schema.postgres.prisma",
     "db:seed": "tsx src/seed.ts"
   },
   "dependencies": {

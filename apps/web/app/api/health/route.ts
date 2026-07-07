@@ -4,7 +4,8 @@ export function GET() {
   return NextResponse.json({
     ok: true,
     service: "secret-manager-web",
-    storage: process.env.DATABASE_URL?.startsWith("file:") ? "sqlite" : "external",
+    storageMode: process.env.SECRET_MANAGER_STORAGE === "prisma" ? "prisma" : "snapshot",
+    sqlConnector: process.env.DATABASE_URL?.startsWith("file:") ? "sqlite" : "external",
     cryptoBoundary: "packages/crypto"
   });
 }

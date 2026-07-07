@@ -1,20 +1,23 @@
+@import "tailwindcss";
+
 :root {
-  --background: #eef2f3;
-  --panel: #ffffff;
-  --panel-muted: #f6f8f8;
-  --ink: #142024;
-  --muted: #627174;
-  --line: #d8e1e2;
-  --line-strong: #b9c7c9;
-  --accent: #0f766e;
-  --accent-dark: #0a5f59;
-  --accent-soft: #e6f7f4;
+  --background: #eef4f5;
+  --panel: rgba(255, 255, 255, 0.92);
+  --panel-muted: #f4f7f8;
+  --ink: #111827;
+  --muted: #647177;
+  --line: #d8e2e5;
+  --line-strong: #9fb0b7;
+  --accent: #0d9488;
+  --accent-dark: #0f766e;
+  --accent-soft: #dff7f4;
   --danger: #b42318;
   --danger-soft: #fff1ef;
-  --warning: #a15c07;
-  --warning-soft: #fff8e8;
-  --sidebar: #11191c;
-  --shadow: 0 18px 55px rgba(20, 32, 36, 0.12);
+  --warning: #b7791f;
+  --warning-soft: #fff8e1;
+  --sidebar: #101820;
+  --shadow: 0 24px 70px rgba(15, 23, 42, 0.16);
+  --shadow-soft: 0 14px 35px rgba(15, 23, 42, 0.08);
 }
 
 * {
@@ -22,10 +25,11 @@
 }
 
 body {
+  overflow-x: hidden;
   margin: 0;
   background: var(--background);
   color: var(--ink);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 button,
@@ -39,16 +43,18 @@ button {
   min-height: 38px;
   border: 0;
   border-radius: 8px;
-  background: var(--accent);
+  background: linear-gradient(180deg, #12a99e, var(--accent-dark));
   color: #fff;
   cursor: pointer;
   font-size: 14px;
   font-weight: 700;
   padding: 0 14px;
+  transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
 }
 
 button:hover {
-  background: var(--accent-dark);
+  background: linear-gradient(180deg, #10b8ad, #0b6f68);
+  box-shadow: 0 8px 20px rgba(13, 148, 136, 0.18);
 }
 
 button:disabled {
@@ -71,6 +77,11 @@ button.secondary:hover,
 
 button.danger {
   background: var(--danger);
+}
+
+button.danger-outline {
+  border-color: #f5b5ad;
+  color: var(--danger);
 }
 
 input,
@@ -101,7 +112,7 @@ label {
 
 .workbench-shell {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 292px minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -110,9 +121,11 @@ label {
   flex-direction: column;
   gap: 26px;
   border-right: 1px solid rgba(255, 255, 255, 0.08);
-  background: var(--sidebar);
+  background:
+    linear-gradient(180deg, rgba(20, 184, 166, 0.16), transparent 28%),
+    var(--sidebar);
   color: #eef7f7;
-  padding: 24px;
+  padding: 24px 20px;
 }
 
 .brand {
@@ -127,9 +140,10 @@ label {
   width: 42px;
   height: 42px;
   border-radius: 8px;
-  background: #1aa89c;
-  color: #061312;
+  background: #a7f3d0;
+  color: #062c27;
   font-weight: 800;
+  box-shadow: inset 0 -10px 22px rgba(15, 118, 110, 0.22);
 }
 
 .brand small,
@@ -202,10 +216,11 @@ label {
   width: 100%;
   min-height: 0;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.055);
   color: #eef7f7;
   padding: 12px;
   text-align: left;
+  backdrop-filter: blur(10px);
 }
 
 .nav-card:hover,
@@ -216,16 +231,23 @@ label {
 
 .main-workspace {
   min-width: 0;
-  padding: 26px;
+  padding: 28px;
 }
 
 .topbar {
   margin-bottom: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.64);
+  box-shadow: var(--shadow-soft);
+  padding: 16px 18px;
+  backdrop-filter: blur(18px);
 }
 
 .topbar h1,
 .toolbar h2,
-.rail-panel h2,
+.selected-secret-panel h2,
+.audit-panel h2,
 .drawer h2,
 .modal h2,
 .wizard-step h3,
@@ -233,18 +255,23 @@ label {
 .topbar p,
 .state-panel strong,
 .empty,
-.rail-panel p {
+.vault-summary p,
+.selected-secret-panel p,
+.audit-panel p {
   margin: 0;
 }
 
 .topbar h1 {
-  font-size: 28px;
+  font-size: 30px;
+  font-weight: 850;
   line-height: 1.1;
 }
 
 .topbar p,
 .empty,
-.rail-panel p,
+.vault-summary p,
+.selected-secret-panel p,
+.audit-panel p,
 .state-panel span,
 .export-flow p {
   color: var(--muted);
@@ -252,7 +279,7 @@ label {
   line-height: 1.5;
 }
 
-.login-form {
+.session-actions {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -261,6 +288,7 @@ label {
 }
 
 .banner {
+  min-height: 45px;
   margin-bottom: 16px;
   border: 1px solid #9bd6cf;
   border-radius: 8px;
@@ -269,6 +297,11 @@ label {
   padding: 12px 14px;
   font-size: 14px;
   font-weight: 700;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.banner.placeholder {
+  visibility: hidden;
 }
 
 .banner.error {
@@ -279,19 +312,19 @@ label {
 
 .workspace-grid {
   display: grid;
-  grid-template-columns: minmax(620px, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   align-items: start;
 }
 
 .secret-workbench,
-.rail-panel,
 .drawer,
 .modal {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
   box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
 }
 
 .secret-workbench {
@@ -316,6 +349,56 @@ label {
   text-transform: uppercase;
 }
 
+.help-term {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+}
+
+.help-trigger {
+  min-height: 0;
+  border: 0;
+  border-bottom: 1px dashed currentColor;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font-size: inherit;
+  font-weight: inherit;
+  text-align: left;
+}
+
+.help-trigger:hover,
+.help-trigger:focus-visible {
+  background: transparent;
+  color: var(--accent-dark);
+}
+
+.vault-sidebar .help-trigger:hover,
+.vault-sidebar .help-trigger:focus-visible {
+  color: #d9fffb;
+}
+
+.help-tooltip {
+  position: absolute;
+  z-index: 30;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: max-content;
+  max-width: min(260px, 82vw);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  padding: 9px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+  text-transform: none;
+}
+
 .toolbar-actions,
 .inline-actions,
 .row-actions {
@@ -329,13 +412,15 @@ label {
 
 .secret-row {
   display: grid;
-  grid-template-columns: minmax(140px, 1.3fr) 54px minmax(95px, 1fr) 110px 92px 174px;
+  grid-template-columns: minmax(170px, 1.3fr) minmax(160px, 1fr) 112px 230px;
   gap: 8px;
   align-items: center;
+  min-width: 760px;
   min-height: 58px;
   border-bottom: 1px solid var(--line);
   padding: 0 14px;
   font-size: 14px;
+  transition: background 120ms ease;
 }
 
 .secret-row.selected {
@@ -373,6 +458,13 @@ label {
   letter-spacing: 0;
 }
 
+.revealed-value {
+  color: var(--danger);
+  font-family: "Courier New", monospace;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
 .mini-button {
   min-height: 30px;
   border: 1px solid var(--line);
@@ -382,19 +474,45 @@ label {
   padding: 0 8px;
 }
 
-.right-rail {
-  display: grid;
-  gap: 16px;
-}
-
-.rail-panel {
+.vault-summary,
+.selected-secret-panel,
+.audit-panel {
   display: grid;
   gap: 14px;
-  padding: 16px;
+  border-top: 1px solid var(--line);
+  padding: 16px 18px;
 }
 
-.rail-panel h2 {
+.selected-secret-panel h2,
+.audit-panel h2,
+.detail-drawer h3 {
+  margin: 3px 0 0;
   font-size: 17px;
+}
+
+.vault-summary {
+  grid-template-columns: minmax(150px, auto) minmax(260px, 1fr) minmax(260px, auto);
+  align-items: center;
+}
+
+.vault-summary .state-copy {
+  grid-column: 1 / -1;
+}
+
+.vault-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.vault-controls select {
+  width: min(280px, 100%);
+}
+
+.trust-state-control {
+  width: min(280px, 100%);
 }
 
 .status-pill {
@@ -437,7 +555,7 @@ label {
 .audit-row {
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--panel-muted);
+  background: rgba(244, 247, 248, 0.86);
   padding: 10px;
 }
 
@@ -461,9 +579,14 @@ label {
 }
 
 .version-list,
-.audit-feed {
+.audit-feed,
+.detail-drawer {
   display: grid;
   gap: 8px;
+}
+
+.detail-drawer {
+  gap: 18px;
 }
 
 .version-row {
@@ -684,6 +807,11 @@ label {
   font-size: 13px;
 }
 
+.plaintext-gate {
+  display: grid;
+  gap: 10px;
+}
+
 .checkbox-row {
   display: flex;
   align-items: center;
@@ -701,7 +829,12 @@ label {
     grid-template-columns: 1fr;
   }
 
+  .main-workspace {
+    order: 1;
+  }
+
   .vault-sidebar {
+    order: 2;
     min-height: auto;
   }
 
@@ -718,7 +851,7 @@ label {
 
   .topbar,
   .toolbar,
-  .login-form,
+  .session-actions,
   .export-flow {
     align-items: stretch;
     grid-template-columns: 1fr;
@@ -738,8 +871,25 @@ label {
 
   .health-list,
   .preview-row,
+  .vault-summary,
   .delete-row {
     grid-template-columns: 1fr;
+  }
+
+  .vault-summary {
+    align-items: stretch;
+  }
+
+  .vault-controls {
+    justify-content: stretch;
+  }
+
+  .vault-controls button {
+    width: 100%;
+  }
+
+  .state-copy {
+    overflow-wrap: anywhere;
   }
 
   .modal {

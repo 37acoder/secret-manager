@@ -180,6 +180,12 @@ model AuditEvent {
   @@index([actorTokenId])
 }
 
+model RuntimeState {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
 enum UserRole {
   owner
   admin

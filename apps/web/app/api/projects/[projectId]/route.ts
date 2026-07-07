@@ -5,7 +5,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ pr
   try {
     const { projectId } = await params;
     const body = await readJson(request);
-    return jsonOk({ project: secretService.updateProject(projectId, body, actorFrom(request)) });
+    return jsonOk({ project: await secretService.updateProject(projectId, body, actorFrom(request)) });
   } catch (error) {
     return jsonError(error);
   }
@@ -14,7 +14,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ pr
 export async function DELETE(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
   try {
     const { projectId } = await params;
-    return jsonOk(secretService.deleteProject(projectId, actorFrom(request)));
+    return jsonOk(await secretService.deleteProject(projectId, actorFrom(request)));
   } catch (error) {
     return jsonError(error);
   }
