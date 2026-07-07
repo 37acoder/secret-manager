@@ -1,4 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { existsSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 export type Project = {
   id: string;
@@ -147,6 +150,7 @@ type State = {
 };
 
 const globalState = globalThis as typeof globalThis & { __secretManagerState?: State };
+const globalSqlite = globalThis as typeof globalThis & { __secretManagerSqlite?: DatabaseSync };
 const ALGORITHM = "aes-256-gcm";
 const KEY_BYTES = 32;
 const NONCE_BYTES = 12;
@@ -155,6 +159,7 @@ const PASSWORD_MAX = 20;
 const UNLOCK_TTL_MS = 10 * 60 * 1000;
 const CLI_TOKEN_TTL_MS = 15 * 60 * 1000;
 const VERIFIER_TEXT = "secret-manager-vault-verifier";
+const STATE_KEY = "secret-manager-state";
 
 function now() {
   return new Date().toISOString();
@@ -311,8 +316,65 @@ function createInitialState(): State {
 }
 
 function state() {
-  globalState.__secretManagerState ??= createInitialState();
+  globalState.__secretManagerState ??= loadPersistedState() ?? persistState(createInitialState());
   return globalState.__secretManagerState;
+}
+
+function persistCurrentState() {
+  persistState(state());
+}
+
+function persistState(current: State): State {
+  sqlite()
+    .prepare("INSERT INTO kv (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at")
+    .run(STATE_KEY, JSON.stringify(toPersistedState(current)), now());
+  return current;
+}
+
+function loadPersistedState(): State | null {
+  const row = sqlite().prepare("SELECT value FROM kv WHERE key = ?").get(STATE_KEY) as { value?: string } | undefined;
+  if (!row?.value) return null;
+  try {
+    const parsed = JSON.parse(row.value) as Omit<State, "temporaryTokens">;
+    return {
+      ...parsed,
+      vaults: parsed.vaults.map((vault) => ({
+        ...vault,
+        locked: true,
+        unlockedKey: undefined,
+        unlockedUntilMs: undefined
+      })),
+      temporaryTokens: []
+    };
+  } catch {
+    return null;
+  }
+}
+
+function toPersistedState(current: State): Omit<State, "temporaryTokens"> {
+  return {
+    projects: current.projects,
+    secrets: current.secrets,
+    auditEvents: current.auditEvents,
+    nextId: current.nextId,
+    vaults: current.vaults.map(({ unlockedKey: _unlockedKey, unlockedUntilMs: _unlockedUntilMs, ...vault }) => ({
+      ...vault,
+      locked: true
+    }))
+  };
+}
+
+function sqlite(): DatabaseSync {
+  if (globalSqlite.__secretManagerSqlite) return globalSqlite.__secretManagerSqlite;
+  const dbPath = process.env.SECRET_MANAGER_SQLITE_PATH ?? join(process.cwd(), ".secret-manager", "state.sqlite");
+  const dir = dirname(dbPath);
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+  const db = new DatabaseSync(dbPath);
+  db.exec("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)");
+  globalSqlite.__secretManagerSqlite = db;
+  return db;
 }
 
 function id(prefix: string) {
@@ -340,6 +402,7 @@ function addAudit(event: Omit<AuditEvent, "id" | "createdAt">) {
     createdAt: now()
   };
   state().auditEvents.unshift(auditEvent);
+  persistCurrentState();
   return auditEvent;
 }
 

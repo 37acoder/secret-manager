@@ -79,9 +79,9 @@ Non-sensitive metadata such as project, vault, key name, description, version nu
 
 ## Current Store Limitation
 
-The web MVP currently uses `apps/web/lib/secret-service.ts`, an in-memory store attached to `globalThis`. It encrypts stored secret values with password-derived vault keys and exposes only masked metadata by default.
+The web MVP currently uses `apps/web/lib/secret-service.ts` with a SQLite3 snapshot store configured by `SECRET_MANAGER_SQLITE_PATH`. It encrypts stored secret values with password-derived vault keys and exposes only masked metadata by default.
 
-Before production use, the web route handlers must be wired to the Prisma persistence layer so encrypted payloads survive process restarts. Until persistence, authentication, authorization, backup, and key recovery are hardened, do not use the app for real production secrets.
+Before production use, the web route handlers should be wired to the Prisma SQL connector layer for normalized relational storage and migration-managed schema changes. Until authentication, authorization, backup, and key recovery are hardened, do not use the app for real production secrets.
 
 ## Redaction
 

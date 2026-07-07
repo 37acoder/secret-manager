@@ -8,5 +8,6 @@ coverage
 *.tsbuildinfo
 dev.db
 dev.db-journal
+.secret-manager/
 playwright-report
 test-results

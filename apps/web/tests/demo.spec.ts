@@ -17,7 +17,7 @@ async function login(page: Page) {
   if (await page.getByLabel("Vault password").isVisible().catch(() => false)) {
     await page.getByLabel("Vault password").fill("demo123");
     await page.getByRole("button", { name: "Unlock vault" }).click();
-    await expect(page.getByText("Vault Production unlocked for this session.")).toBeVisible();
+    await expect(page.getByText(/Vault .+ unlocked for this session\./)).toBeVisible();
   }
 }
 

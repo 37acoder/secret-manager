@@ -4,7 +4,7 @@ This guide describes the current SecretManager MVP workflows from the web workbe
 
 Use fake/demo values while the project is a prototype. Do not paste real credentials into the web UI, CLI, issue comments, chat, docs, tests, logs, or screenshots.
 
-For encryption and storage details, read [security-design.md](security-design.md). The current web app stores encrypted secret payloads in a local in-memory store; production hardening still needs Prisma persistence, authentication, authorization, backup, and recovery work.
+For encryption and storage details, read [security-design.md](security-design.md). The current web app stores encrypted secret payloads in a local SQLite3 snapshot store; production hardening still needs Prisma SQL connector persistence, authentication, authorization, backup, and recovery work.
 
 ## Start The Web App
 

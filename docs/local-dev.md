@@ -35,6 +35,14 @@ Use `sm unlock` to exchange the vault password for a temporary read token. Plain
 
 The default local setup uses SQLite through `DATABASE_URL=file:./dev.db`.
 
+The web MVP also stores its encrypted local runtime snapshot in SQLite3:
+
+```bash
+SECRET_MANAGER_SQLITE_PATH=.secret-manager/state.sqlite
+```
+
+This file stores encrypted vault/secret state and safe metadata. It does not store vault passwords, derived in-memory unlock keys, or temporary CLI tokens.
+
 For a Postgres-style deployment rehearsal:
 
 ```bash
@@ -42,6 +50,8 @@ docker compose up db
 ```
 
 Then point `DATABASE_URL` at the local Postgres service before running migrations.
+
+The current web runtime uses the local SQLite snapshot store. The Prisma SQL connector is available as the next persistence hardening layer for normalized relational storage.
 
 ## Verification
 

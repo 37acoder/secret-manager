@@ -22,7 +22,7 @@ The running web MVP encrypts secret values with a password-derived vault key:
 
 Application code should call service interfaces. UI and route handlers must not assemble crypto primitives directly.
 
-The current web route handlers use an encrypted in-memory store for local operation. The next hardening step is wiring the encrypted payload shape to Prisma persistence. See [security-design.md](security-design.md) for the detailed algorithm, storage format, plaintext boundary, and production hardening checklist.
+The current web route handlers use an encrypted SQLite3 snapshot store for local operation. The next hardening step is wiring the encrypted payload shape to Prisma SQL connector persistence. See [security-design.md](security-design.md) for the detailed algorithm, storage format, plaintext boundary, and production hardening checklist.
 
 ## API Shape
 

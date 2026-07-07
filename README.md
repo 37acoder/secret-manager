@@ -104,6 +104,12 @@ The current route handlers cover project, vault, secret, import, export, audit, 
 
 Read [SECURITY.md](SECURITY.md), [docs/threat-model.md](docs/threat-model.md), and [docs/api-token-boundary.md](docs/api-token-boundary.md) before extending the project.
 
+## Persistence
+
+The running web MVP persists encrypted local state to SQLite3 through `SECRET_MANAGER_SQLITE_PATH`, defaulting to `.secret-manager/state.sqlite` under the web app working directory. The file contains encrypted secret payloads and metadata; it does not contain vault passwords, derived unlock keys, or temporary CLI tokens.
+
+The repo also includes the Prisma SQL connector boundary in `packages/db`. `DATABASE_URL=file:./dev.db` is the default local SQLite connector, and `docker-compose.yml` provides a Postgres rehearsal service for SQL connector hardening.
+
 ## Verification
 
 The narrow checks used for the current MVP:
